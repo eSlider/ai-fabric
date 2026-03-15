@@ -8,4 +8,6 @@ set -a
 source "${ROOT_DIR}/.env"
 set +a
 
+export ISSUE_HANDLER_TRIGGER_SCRIPT="${ISSUE_HANDLER_TRIGGER_SCRIPT:-${ROOT_DIR}/bin/issue_handler.sh}"
+
 exec ./bin/issue_handler.py "$@"
