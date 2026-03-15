@@ -35,6 +35,95 @@ ARCH_START = "<!-- ai-fabric:solution-architect:start -->"
 ARCH_END = "<!-- ai-fabric:solution-architect:end -->"
 
 
+def _derive_trigger_event(once: bool, issue_number: int | None) -> str:
+    if issue_number is not None:
+        return "single_issue"
+    if once:
+        return "poll_open_issues_once"
+    return "poll_open_issues"
+
+
+def collect_trigger_path_errors(
+    *,
+    once: bool,
+    issue_number: int | None,
+    trigger_event_hint: str | None,
+    trigger_repo_hint: str | None,
+    trigger_branch_hint: str | None,
+    trigger_script_hint: str | None,
+    expected_script_path: Path,
+    owner: str,
+    repo: str,
+    base_branch: str,
+) -> list[str]:
+    errors: list[str] = []
+    event = _derive_trigger_event(once=once, issue_number=issue_number)
+    repo_slug = f"{owner}/{repo}"
+
+    if issue_number is not None and not once:
+        errors.append("Single-issue trigger requires --once mode.")
+    if issue_number is not None and issue_number <= 0:
+        errors.append("Issue number must be a positive integer.")
+
+    if not owner.strip() or not repo.strip():
+        errors.append("Invalid repository slug: owner/repo must be set.")
+    elif not re.match(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", repo_slug):
+        errors.append(f"Invalid repository slug: {repo_slug!r}.")
+
+    if not base_branch.strip():
+        errors.append("ISSUE_BASE_BRANCH must be non-empty.")
+
+    expected = expected_script_path.resolve()
+    if not expected.exists():
+        errors.append(f"Expected trigger script does not exist: {expected}.")
+
+    if trigger_event_hint and trigger_event_hint != event:
+        errors.append(f"Trigger event mismatch: expected {event!r}, got {trigger_event_hint!r}.")
+    if trigger_repo_hint and trigger_repo_hint != repo_slug:
+        errors.append(f"Trigger repository mismatch: expected {repo_slug!r}, got {trigger_repo_hint!r}.")
+    if trigger_branch_hint and trigger_branch_hint != base_branch:
+        errors.append(f"Trigger branch mismatch: expected {base_branch!r}, got {trigger_branch_hint!r}.")
+
+    if trigger_script_hint:
+        provided = Path(trigger_script_hint)
+        if not provided.is_absolute():
+            provided = (ROOT_DIR / provided).resolve()
+        else:
+            provided = provided.resolve()
+        if provided != expected:
+            errors.append(f"Trigger script mismatch: expected {expected}, got {provided}.")
+
+    return errors
+
+
+def validate_trigger_path(*, once: bool, issue_number: int | None) -> None:
+    expected_script_path = ROOT_DIR / "bin" / "issue_handler.sh"
+    trigger_event_hint = os.environ.get("ISSUE_TRIGGER_EVENT", "").strip() or None
+    trigger_repo_hint = os.environ.get("ISSUE_TRIGGER_REPO", "").strip() or None
+    trigger_branch_hint = os.environ.get("ISSUE_TRIGGER_BASE_BRANCH", "").strip() or None
+    trigger_script_hint = os.environ.get("ISSUE_HANDLER_TRIGGER_SCRIPT", "").strip() or None
+    errors = collect_trigger_path_errors(
+        once=once,
+        issue_number=issue_number,
+        trigger_event_hint=trigger_event_hint,
+        trigger_repo_hint=trigger_repo_hint,
+        trigger_branch_hint=trigger_branch_hint,
+        trigger_script_hint=trigger_script_hint,
+        expected_script_path=expected_script_path,
+        owner=GITEA_OWNER,
+        repo=GITEA_REPO,
+        base_branch=BASE_BRANCH,
+    )
+    if errors:
+        joined = "\n".join(f"- {err}" for err in errors)
+        raise SystemExit(f"Invalid issue trigger path:\n{joined}")
+    event = _derive_trigger_event(once=once, issue_number=issue_number)
+    print(
+        f"[issue-handler] trigger validated: event={event} "
+        f"repo={GITEA_OWNER}/{GITEA_REPO} branch={BASE_BRANCH} script={expected_script_path}"
+    )
+
+
 def _request_to_base(base_url: str, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
     body = None
     headers = {"Authorization": f"token {GITEA_TOKEN}", "Content-Type": "application/json"}
@@ -458,6 +547,8 @@ def main() -> int:
 
     if not GITEA_TOKEN:
         raise SystemExit("GITEA_BOT_TOKEN is required in environment")
+
+    validate_trigger_path(once=args.once, issue_number=args.issue_number)
 
     if args.once:
         run_once(target_issue=args.issue_number)
