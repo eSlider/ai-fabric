@@ -25,6 +25,7 @@ GITEA_TOKEN = os.environ.get("GITEA_BOT_TOKEN", "").strip()
 BASE_BRANCH = os.environ.get("ISSUE_BASE_BRANCH", "main")
 POLL_INTERVAL = int(os.environ.get("ISSUE_POLL_INTERVAL_SEC", "45"))
 MAX_FIX_ATTEMPTS = int(os.environ.get("ISSUE_MAX_FIX_ATTEMPTS", "3"))
+RETRY_INTERVAL_SEC = int(os.environ.get("ISSUE_RETRY_INTERVAL_SEC", "600"))
 AGENT_BIN = os.environ.get("ISSUE_AGENT_BIN", "agent").strip()
 AGENT_EXTRA_ARGS = os.environ.get("ISSUE_AGENT_EXTRA_ARGS", "").strip()
 DRY_RUN = os.environ.get("ISSUE_HANDLER_DRY_RUN", "0").strip() == "1"
@@ -155,6 +156,9 @@ def worktree_path(issue_number: int) -> Path:
 
 
 def ensure_worktree(branch: str, path: Path) -> None:
+    # Avoid Git safe.directory failures when running under different users/containers.
+    run(["git", "config", "--global", "--add", "safe.directory", str(ROOT_DIR)], cwd=ROOT_DIR)
+    run(["git", "config", "--global", "--add", "safe.directory", "/workspace"], cwd=ROOT_DIR)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         run(["git", "worktree", "remove", "--force", str(path)])
@@ -428,8 +432,12 @@ def run_once(target_issue: int | None = None) -> None:
         current = state.get("issues", {}).get(str(num), {})
         # Never re-trigger automatically once an issue is tracked.
         # This prevents duplicate architect runs and avoids retriggering on issue edits.
-        if target_issue is None and current.get("status") in {"in_progress", "pr_opened", "failed"}:
+        if target_issue is None and current.get("status") in {"in_progress", "pr_opened"}:
             continue
+        if target_issue is None and current.get("status") == "failed":
+            last = int(current.get("updated_at", 0) or 0)
+            if int(time.time()) - last < RETRY_INTERVAL_SEC:
+                continue
         if target_issue is not None and current.get("status") == "pr_opened":
             continue
         try:
