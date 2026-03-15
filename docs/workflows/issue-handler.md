@@ -20,13 +20,13 @@ Automatically process each open issue by delegating implementation to an agent, 
 2. Skip issues already marked with open PR state in local handler state.
 3. Classify issue type (`bug` or `feature`).
 4. Select relevant skills/docs context from issue text.
-5. Run **Solution Architect stage** with `cursor-agent`.
+5. Run **Solution Architect stage** with `agent`.
 6. Update issue body directly with:
    - possible solutions
    - recommended approach
    - estimation
 7. Prepare isolated git worktree (`issue/<id>-<slug>`).
-8. Run developer agent (default `cursor-agent`) with generated prompt.
+8. Run developer agent (default `agent`) with generated prompt.
 9. Run quality gates:
    - `./bin/fmt.sh`
    - `./bin/lint.sh`
@@ -41,7 +41,7 @@ Environment variables:
 - `ISSUE_BASE_BRANCH` (default `main`)
 - `ISSUE_POLL_INTERVAL_SEC` (default `45`)
 - `ISSUE_MAX_FIX_ATTEMPTS` (default `3`)
-- `ISSUE_AGENT_BIN` (default `cursor-agent`)
+- `ISSUE_AGENT_BIN` (default `agent`)
 - `ISSUE_AGENT_EXTRA_ARGS`
 - `ISSUE_HANDLER_DRY_RUN` (`1` for safe dry-run)
 - `ISSUE_ARCHITECT_ENABLED` (`1` by default)
