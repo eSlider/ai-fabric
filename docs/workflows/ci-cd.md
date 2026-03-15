@@ -27,3 +27,13 @@ All push/PR events must pass:
 
 - Follow `docs/workflows/pr-best-practices.md` for branch and review norms.
 - Issue automation flow: `docs/workflows/issue-handler.md`.
+
+## Release on main
+
+- On push to `main` (after backpressure passes), CI calculates the next semantic version from commit messages since the latest `vX.Y.Z` tag.
+- Bump policy:
+  - `major`: commit contains `BREAKING CHANGE:` footer or Conventional Commit bang marker (`type!:`).
+  - `minor`: at least one `feat:` commit and no major marker.
+  - `patch`: any other commit.
+- CI creates and pushes the new `vX.Y.Z` tag (idempotent if the tag already exists).
+- CI builds release artifact `dist/ai-fabric-vX.Y.Z.tar.gz` from `HEAD` and uploads it as workflow artifact.
