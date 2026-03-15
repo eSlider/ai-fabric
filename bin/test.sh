@@ -7,7 +7,11 @@ required=(
   "${ROOT_DIR}/README.md"
   "${ROOT_DIR}/docker-compose.yml"
   "${ROOT_DIR}/docs/README.md"
+  "${ROOT_DIR}/docs/workflows/pr-best-practices.md"
   "${ROOT_DIR}/.gitea/workflows/ci.yml"
+  "${ROOT_DIR}/.gitea/PULL_REQUEST_TEMPLATE.md"
+  "${ROOT_DIR}/CODEOWNERS"
+  "${ROOT_DIR}/bin/pr_policy.sh"
 )
 
 for path in "${required[@]}"; do

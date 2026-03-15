@@ -25,3 +25,6 @@ jobs:
 
       - name: review-policy
         run: ./bin/review_policy.sh
+
+      - name: pr-policy
+        run: ./bin/pr_policy.sh

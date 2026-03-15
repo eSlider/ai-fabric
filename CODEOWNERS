@@ -1,0 +1,8 @@
+# Default owner
+* @eslider
+
+# Critical workflow and infra paths
+/.gitea/workflows/* @eslider
+/docker-compose.yml @eslider
+/bin/* @eslider
+/docs/workflows/* @eslider

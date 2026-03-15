@@ -22,9 +22,9 @@ services:
       timeout: 5s
       retries: 20
 
-  gitea-runner:
+  gitea-runner-1:
     image: docker.io/gitea/act_runner:0.2.11
-    container_name: ai-fabric-runner
+    container_name: ai-fabric-runner-1
     restart: unless-stopped
     depends_on:
       gitea:
@@ -34,14 +34,35 @@ services:
     environment:
       GITEA_INSTANCE_URL: ${GITEA_INSTANCE_URL:-http://gitea:3000}
       GITEA_RUNNER_REGISTRATION_TOKEN: ${GITEA_RUNNER_REGISTRATION_TOKEN}
-      GITEA_RUNNER_NAME: ${GITEA_RUNNER_NAME:-ai-fabric-runner-1}
+      GITEA_RUNNER_NAME: ${GITEA_RUNNER_NAME_1:-ai-fabric-runner-1}
       CONFIG_FILE: /data/config.yaml
     volumes:
-      - ./var/runner:/data
+      - ./var/runner-1:/data
       - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "set -eu; if [ ! -f /data/config.yaml ]; then act_runner generate-config > /data/config.yaml; fi; if [ -z \"${GITEA_RUNNER_REGISTRATION_TOKEN:-}\" ] || [ \"${GITEA_RUNNER_REGISTRATION_TOKEN}\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /data/.runner ]; then act_runner register --no-interactive --instance \"${GITEA_INSTANCE_URL}\" --token \"${GITEA_RUNNER_REGISTRATION_TOKEN}\" --name \"${GITEA_RUNNER_NAME}\"; fi; exec act_runner daemon --config /data/config.yaml"
+      - "set -eu; if [ ! -f /data/config.yaml ]; then act_runner generate-config | sed 's#network: \"\"#network: \"ai-fabric_default\"#' > /data/config.yaml; fi; if [ -z \"$${GITEA_RUNNER_REGISTRATION_TOKEN:-}\" ] || [ \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /data/.runner ]; then act_runner register --no-interactive --instance \"$${GITEA_INSTANCE_URL}\" --token \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" --name \"$${GITEA_RUNNER_NAME}\"; fi; exec act_runner daemon --config /data/config.yaml"
+
+  gitea-runner-2:
+    image: docker.io/gitea/act_runner:0.2.11
+    container_name: ai-fabric-runner-2
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      GITEA_INSTANCE_URL: ${GITEA_INSTANCE_URL:-http://gitea:3000}
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${GITEA_RUNNER_REGISTRATION_TOKEN}
+      GITEA_RUNNER_NAME: ${GITEA_RUNNER_NAME_2:-ai-fabric-runner-2}
+      CONFIG_FILE: /data/config.yaml
+    volumes:
+      - ./var/runner-2:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "set -eu; if [ ! -f /data/config.yaml ]; then act_runner generate-config | sed 's#network: \"\"#network: \"ai-fabric_default\"#' > /data/config.yaml; fi; if [ -z \"$${GITEA_RUNNER_REGISTRATION_TOKEN:-}\" ] || [ \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /data/.runner ]; then act_runner register --no-interactive --instance \"$${GITEA_INSTANCE_URL}\" --token \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" --name \"$${GITEA_RUNNER_NAME}\"; fi; exec act_runner daemon --config /data/config.yaml"
 
   postgres:
     image: docker.io/library/postgres:16-alpine
