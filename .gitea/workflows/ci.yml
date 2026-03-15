@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+
+jobs:
+  backpressure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: fmt
+        run: ./bin/fmt.sh
+
+      - name: lint
+        run: ./bin/lint.sh
+
+      - name: test
+        run: ./bin/test.sh
+
+      - name: review-policy
+        run: ./bin/review_policy.sh

@@ -1,0 +1,7 @@
+# Search/context hygiene
+var/
+.git/
+.cursor/
+.idea/
+.vscode/
+.env
