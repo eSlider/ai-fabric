@@ -33,3 +33,46 @@ jobs:
 
       - name: pr-policy
         run: ./bin/pr_policy.sh
+
+  release:
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    needs: backpressure
+    steps:
+      - name: Install release dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git python3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve semantic version
+        id: version
+        run: |
+          version="$(python3 ./bin/semantic_version.py next)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create and push version tag
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag already exists: ${tag}"
+            exit 0
+          fi
+          git tag "${tag}"
+          git push origin "${tag}"
+
+      - name: Build release artifact
+        id: artifact
+        run: |
+          artifact_path="$(bash ./bin/build_artifact.sh --version "${{ steps.version.outputs.version }}")"
+          echo "artifact_path=${artifact_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-fabric-v${{ steps.version.outputs.version }}
+          path: ${{ steps.artifact.outputs.artifact_path }}
