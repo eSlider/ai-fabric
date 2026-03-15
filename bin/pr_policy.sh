@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import urllib.request
 
 event_path = os.environ["GITHUB_EVENT_PATH"]
 with open(event_path, "r", encoding="utf-8") as f:
@@ -26,6 +27,27 @@ with open(event_path, "r", encoding="utf-8") as f:
 
 pr = payload.get("pull_request") or {}
 body = pr.get("body") or ""
+
+def fetch_pr_body_from_api(payload_obj):
+    pr_obj = payload_obj.get("pull_request") or {}
+    number = pr_obj.get("number") or payload_obj.get("number")
+    repo = payload_obj.get("repository") or {}
+    full_name = repo.get("full_name") or os.environ.get("GITHUB_REPOSITORY", "")
+    token = os.environ.get("GITHUB_TOKEN", "")
+    server = os.environ.get("GITHUB_SERVER_URL", "")
+    if not number or not full_name or not token or not server:
+        return ""
+    url = f"{server}/api/v1/repos/{full_name}/pulls/{number}"
+    req = urllib.request.Request(url, headers={"Authorization": f"token {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return (data.get("body") or "").strip()
+    except Exception:
+        return ""
+
+if not body.strip():
+    body = fetch_pr_body_from_api(payload)
 
 required_sections = [
     "## Problem",

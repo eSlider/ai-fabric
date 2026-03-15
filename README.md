@@ -43,10 +43,12 @@ Lean AI project fabric based on Gitea + Gitea Actions, optimized for:
 
 1. Configure in `.env`:
    - `GITEA_BOT_TOKEN=<gitea_access_token>`
-   - `ISSUE_AGENT_BIN=cursor-agent`
+   - `ISSUE_AGENT_BIN=agent`
    - `ISSUE_ARCHITECT_ENABLED=1`
    - `CURSOR_SETTINGS_DIR=/home/ano/.cursor`
    - `CURSOR_CONFIG_DIR=/home/ano/.config/Cursor`
+   - `CURSOR_LOCAL_BIN_DIR=/home/ano/.local/bin`
+   - `CURSOR_AGENT_HOME_DIR=/home/ano/.local/share/cursor-agent`
 2. Start service:
    - `docker compose -f docker-compose.yml up -d issue-handler`
 3. One-shot dry-run:
