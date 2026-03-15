@@ -21,6 +21,7 @@ GITEA_OWNER = os.environ.get("GITEA_BOT_OWNER", "eslider").strip()
 GITEA_REPO = os.environ.get("GITEA_BOT_REPO", "ai-fabric").strip()
 GITEA_TOKEN = os.environ.get("GITEA_BOT_TOKEN", "").strip()
 ISSUE_HANDLER_TRIGGER_ON_CREATE = os.environ.get("ISSUE_HANDLER_TRIGGER_ON_CREATE", "1").strip() == "1"
+ISSUE_APPROVALS_FILE = os.environ.get("ISSUE_APPROVALS_FILE", "var/issue-handler/approvals.json").strip()
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 ALLOWED_CHAT_IDS = {
@@ -36,6 +37,7 @@ PROJECT_CREATION_PENDING: dict[int, bool] = {}
 class TaskDraft:
     task_type: str
     raw: str
+    chat_id: int
     owner: str
     repo: str
     fields: dict[str, str] = field(default_factory=dict)
@@ -138,8 +140,11 @@ def parse_field_answer(text: str, field_name: str) -> str:
 
 
 def build_issue_body(task: TaskDraft) -> str:
+    marker = f"<!-- ai-fabric:telegram-chat-id:{task.chat_id} -->\n"
     if task.task_type == "bug":
         return (
+            marker
+            +
             "## Type\nbug\n\n"
             f"## Problem\n{task.fields['problem']}\n\n"
             f"## Steps To Reproduce\n{task.fields['steps']}\n\n"
@@ -148,6 +153,8 @@ def build_issue_body(task: TaskDraft) -> str:
             f"## Original Request\n{task.raw}\n"
         )
     return (
+        marker
+        +
         "## Type\nfeature\n\n"
         f"## Goal\n{task.fields['goal']}\n\n"
         f"## Value\n{task.fields['value']}\n\n"
@@ -190,7 +197,7 @@ def create_gitea_issue(task: TaskDraft) -> tuple[str, int]:
 def start_task_flow(chat_id: int, text: str) -> str:
     task_type = classify_task(text)
     owner, repo = selected_project_slug(chat_id)
-    draft = TaskDraft(task_type=task_type, raw=text, owner=owner, repo=repo)
+    draft = TaskDraft(task_type=task_type, raw=text, chat_id=chat_id, owner=owner, repo=repo)
     TASK_DRAFTS[chat_id] = draft
     missing = missing_fields(draft)
     first = missing[0]
@@ -223,6 +230,95 @@ def continue_task_flow(chat_id: int, text: str) -> str:
     if url and number > 0:
         return f"Issue created: {url}\nSolution Architect pipeline triggered for issue #{number}."
     return f"Issue created: {url}" if url else "Issue created."
+
+
+def approvals_path() -> Path:
+    p = Path(ISSUE_APPROVALS_FILE)
+    return p if p.is_absolute() else Path(ROOT_DIR) / p
+
+
+def load_approvals() -> dict:
+    p = approvals_path()
+    if not p.exists():
+        return {"issues": {}}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {"issues": {}}
+
+
+def save_approvals(data: dict) -> None:
+    p = approvals_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
+def pending_approval_for_chat(chat_id: int) -> Optional[tuple[str, dict]]:
+    data = load_approvals()
+    issues = data.get("issues") or {}
+    pending = []
+    for issue_num, rec in issues.items():
+        if int(rec.get("chat_id", 0) or 0) != chat_id:
+            continue
+        if (rec.get("status") or "").lower() != "pending":
+            continue
+        pending.append((issue_num, rec))
+    if not pending:
+        return None
+    pending.sort(key=lambda x: int(x[1].get("updated_at", 0) or 0), reverse=True)
+    return pending[0]
+
+
+def handle_approval_reply(chat_id: int, text: str) -> bool:
+    pending = pending_approval_for_chat(chat_id)
+    if pending is None:
+        return False
+    issue_num, rec = pending
+    t = text.strip().lower()
+    options = rec.get("options") or []
+
+    if t in {"cancel", "no", "/cancel"}:
+        rec["status"] = "cancelled"
+        rec["decision"] = "cancelled"
+        rec["updated_at"] = int(time.time())
+        data = load_approvals()
+        data.setdefault("issues", {})[issue_num] = rec
+        save_approvals(data)
+        send_message(chat_id, f"Cancelled issue #{issue_num}. It will be closed by handler.")
+        return True
+
+    if t in {"confirm", "approve", "yes", "ok", "/approve"}:
+        rec["status"] = "approved"
+        rec["decision"] = "recommended"
+        rec["selected_option_index"] = None
+        rec["selected_option_text"] = ""
+        rec["updated_at"] = int(time.time())
+        data = load_approvals()
+        data.setdefault("issues", {})[issue_num] = rec
+        save_approvals(data)
+        send_message(chat_id, f"Approved recommended approach for issue #{issue_num}.")
+        return True
+
+    if t.isdigit():
+        idx = int(t) - 1
+        if idx < 0 or idx >= len(options):
+            send_message(chat_id, f"Invalid option. Choose 1..{len(options)}, or use confirm/cancel.")
+            return True
+        rec["status"] = "approved"
+        rec["decision"] = "selected_option"
+        rec["selected_option_index"] = idx + 1
+        rec["selected_option_text"] = options[idx]
+        rec["updated_at"] = int(time.time())
+        data = load_approvals()
+        data.setdefault("issues", {})[issue_num] = rec
+        save_approvals(data)
+        send_message(chat_id, f"Approved option {idx+1} for issue #{issue_num}.")
+        return True
+
+    send_message(chat_id, "Approval pending. Reply with option number, confirm, or cancel.")
+    return True
 
 
 def run_cmd(cmd: list[str], timeout: int = 45) -> tuple[int, str]:
@@ -395,6 +491,7 @@ def handle_command(chat_id: int, text: str) -> None:
                 "/checks - run fmt/lint/test/review policy\n"
                 "/projects - choose or create project for /task\n"
                 "/task <description> - classify and create a clear Gitea issue\n"
+                "When Solution Architect asks for approval, reply: <option-number> | confirm | cancel\n"
                 "/logs <service> - tail logs for gitea|gitea-runner-1|gitea-runner-2|issue-handler|telegram-bot"
             ),
         )
@@ -530,6 +627,8 @@ def main() -> int:
                     continue
                 if text.startswith("/"):
                     handle_command(chat_id, text)
+                    continue
+                if handle_approval_reply(chat_id, text):
                     continue
                 try:
                     handle_non_command_message(chat_id, text)
