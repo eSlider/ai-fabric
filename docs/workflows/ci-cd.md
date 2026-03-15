@@ -26,3 +26,4 @@ All push/PR events must pass:
 ## Additional Policy
 
 - Follow `docs/workflows/pr-best-practices.md` for branch and review norms.
+- Issue automation flow: `docs/workflows/issue-handler.md`.
