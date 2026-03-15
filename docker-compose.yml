@@ -1,0 +1,56 @@
+services:
+  gitea:
+    image: docker.gitea.com/gitea:1.24.6
+    container_name: ai-fabric-gitea
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      USER_UID: 1000
+      USER_GID: 1000
+      GITEA__actions__ENABLED: "true"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__database__PATH: /data/gitea/gitea.db
+    ports:
+      - "${GITEA_HTTP_PORT:-3000}:3000"
+      - "${GITEA_SSH_PORT:-2222}:22"
+    volumes:
+      - ./var/gitea:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  gitea-runner:
+    image: docker.io/gitea/act_runner:0.2.11
+    container_name: ai-fabric-runner
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      GITEA_INSTANCE_URL: ${GITEA_INSTANCE_URL:-http://gitea:3000}
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${GITEA_RUNNER_REGISTRATION_TOKEN}
+      GITEA_RUNNER_NAME: ${GITEA_RUNNER_NAME:-ai-fabric-runner-1}
+      CONFIG_FILE: /data/config.yaml
+    volumes:
+      - ./var/runner:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "set -eu; if [ ! -f /data/config.yaml ]; then act_runner generate-config > /data/config.yaml; fi; if [ -z \"${GITEA_RUNNER_REGISTRATION_TOKEN:-}\" ] || [ \"${GITEA_RUNNER_REGISTRATION_TOKEN}\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /data/.runner ]; then act_runner register --no-interactive --instance \"${GITEA_INSTANCE_URL}\" --token \"${GITEA_RUNNER_REGISTRATION_TOKEN}\" --name \"${GITEA_RUNNER_NAME}\"; fi; exec act_runner daemon --config /data/config.yaml"
+
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: ai-fabric-postgres
+    restart: unless-stopped
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gitea}
+      POSTGRES_USER: ${POSTGRES_USER:-gitea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gitea}
+    volumes:
+      - ./var/postgres:/var/lib/postgresql/data
