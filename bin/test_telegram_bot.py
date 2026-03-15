@@ -1,73 +1,100 @@
 import unittest
-from unittest import mock
+from unittest.mock import patch
 
 import telegram_bot
 
 
-class CreateGiteaIssueLabelTests(unittest.TestCase):
+class TelegramProjectsFlowTests(unittest.TestCase):
     def setUp(self) -> None:
-        telegram_bot.LABEL_ID_CACHE.clear()
+        telegram_bot.TASK_DRAFTS.clear()
+        telegram_bot.SELECTED_PROJECTS.clear()
+        telegram_bot.PROJECT_CREATION_PENDING.clear()
 
-    def test_resolve_issue_label_ids_matches_name_case_insensitive(self) -> None:
-        with mock.patch(
-            "telegram_bot.gitea_request",
-            return_value=[
-                {"id": 2, "name": "feature"},
-                {"id": 5, "name": "Bug"},
-            ],
-        ):
-            labels = telegram_bot.resolve_issue_label_ids("bug")
+    @patch("telegram_bot.gitea_request")
+    @patch("telegram_bot.send_message")
+    def test_projects_command_lists_repos_and_highlights_current(self, send_message_mock, gitea_request_mock) -> None:
+        chat_id = 100
+        telegram_bot.SELECTED_PROJECTS[chat_id] = "alice/current-repo"
+        gitea_request_mock.return_value = [
+            {"full_name": "alice/current-repo"},
+            {"full_name": "alice/other-repo"},
+        ]
 
-        self.assertEqual(labels, [5])
+        telegram_bot.handle_command(chat_id, "/projects")
 
-    def test_create_issue_sets_bug_label_id_in_payload(self) -> None:
-        task = telegram_bot.TaskDraft(
-            task_type="bug",
-            raw="Fix login error",
-            fields={
-                "problem": "Login fails",
-                "steps": "Open login page and submit valid credentials",
-                "expected": "User is signed in",
-                "actual": "A 500 error is shown",
-            },
-        )
+        self.assertEqual(gitea_request_mock.call_count, 1)
+        method, path = gitea_request_mock.call_args[0]
+        self.assertEqual(method, "GET")
+        self.assertTrue(path.startswith("/api/v1/user/repos"))
 
-        with (
-            mock.patch("telegram_bot.trigger_issue_handler"),
-            mock.patch("telegram_bot.resolve_issue_label_ids", return_value=[11]),
-            mock.patch(
-                "telegram_bot.gitea_request",
-                return_value={"html_url": "https://example.test/issues/42", "number": 42},
-            ) as gitea_mock,
-        ):
-            telegram_bot.create_gitea_issue(task)
+        args, kwargs = send_message_mock.call_args
+        self.assertIn("Select project", args[1])
+        self.assertIn("alice/current-repo", args[1])
+        keyboard = kwargs["reply_markup"]["inline_keyboard"]
+        current_button_text = keyboard[0][0]["text"]
+        self.assertTrue(current_button_text.startswith("✅ "))
 
-        _, _, payload = gitea_mock.call_args.args
-        self.assertEqual(payload.get("labels"), [11])
+    @patch("telegram_bot.send_message")
+    def test_select_project_callback_updates_selected_project(self, send_message_mock) -> None:
+        chat_id = 101
 
-    def test_create_issue_omits_labels_when_label_not_found(self) -> None:
-        task = telegram_bot.TaskDraft(
-            task_type="feature",
-            raw="Add dark mode toggle",
-            fields={
-                "goal": "Add dark mode toggle",
-                "value": "Improve usability at night",
-                "acceptance": "User can switch theme and preference persists",
-            },
-        )
+        telegram_bot.handle_project_callback(chat_id, "select|alice/new-repo")
 
-        with (
-            mock.patch("telegram_bot.trigger_issue_handler"),
-            mock.patch("telegram_bot.resolve_issue_label_ids", return_value=[]),
-            mock.patch(
-                "telegram_bot.gitea_request",
-                return_value={"html_url": "https://example.test/issues/7", "number": 7},
-            ) as gitea_mock,
-        ):
-            telegram_bot.create_gitea_issue(task)
+        self.assertEqual(telegram_bot.SELECTED_PROJECTS[chat_id], "alice/new-repo")
+        args, _ = send_message_mock.call_args
+        self.assertIn("Current project set to alice/new-repo", args[1])
 
-        _, _, payload = gitea_mock.call_args.args
-        self.assertNotIn("labels", payload)
+    @patch("telegram_bot.trigger_issue_handler")
+    @patch("telegram_bot.gitea_request")
+    @patch("telegram_bot.send_message")
+    def test_task_flow_creates_issue_in_selected_project(
+        self,
+        send_message_mock,
+        gitea_request_mock,
+        trigger_issue_handler_mock,
+    ) -> None:
+        chat_id = 102
+        telegram_bot.SELECTED_PROJECTS[chat_id] = "bob/roadmap"
+
+        def fake_gitea_request(method: str, path: str, data=None):  # noqa: ANN001
+            if method == "POST" and path == "/api/v1/repos/bob/roadmap/issues":
+                return {"html_url": "https://example.test/i/1", "number": 1}
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+        gitea_request_mock.side_effect = fake_gitea_request
+
+        telegram_bot.handle_command(chat_id, "/task add dashboard widgets")
+        telegram_bot.handle_non_command_message(chat_id, "Build widgets dashboard")
+        telegram_bot.handle_non_command_message(chat_id, "Lets team track KPIs")
+        telegram_bot.handle_non_command_message(chat_id, "Users can add/remove widgets")
+
+        self.assertEqual(gitea_request_mock.call_count, 1)
+        self.assertEqual(send_message_mock.call_count, 4)
+        args, _ = send_message_mock.call_args
+        self.assertIn("Issue created", args[1])
+        trigger_issue_handler_mock.assert_called_once_with(1, "bob", "roadmap")
+
+    @patch("telegram_bot.gitea_request")
+    @patch("telegram_bot.send_message")
+    def test_create_project_flow_creates_and_selects_new_project(self, send_message_mock, gitea_request_mock) -> None:
+        chat_id = 103
+
+        def fake_gitea_request(method: str, path: str, data=None):  # noqa: ANN001
+            if method == "POST" and path == "/api/v1/user/repos":
+                self.assertEqual(data, {"name": "new-project"})
+                return {"full_name": "alice/new-project"}
+            if method == "GET" and path.startswith("/api/v1/user/repos"):
+                return [{"full_name": "alice/new-project"}]
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+        gitea_request_mock.side_effect = fake_gitea_request
+
+        telegram_bot.handle_project_callback(chat_id, "create")
+        telegram_bot.handle_non_command_message(chat_id, "New Project")
+
+        self.assertEqual(telegram_bot.SELECTED_PROJECTS[chat_id], "alice/new-project")
+        self.assertNotIn(chat_id, telegram_bot.PROJECT_CREATION_PENDING)
+        self.assertEqual(send_message_mock.call_count, 3)
 
 
 if __name__ == "__main__":
