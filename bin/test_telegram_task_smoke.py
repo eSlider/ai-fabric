@@ -32,6 +32,7 @@ class TelegramTaskApiSmokeTests(unittest.TestCase):
         draft = telegram_bot.TaskDraft(
             task_type="feature",
             raw=f"smoke create issue {marker}",
+            chat_id=123456,
             owner=owner,
             repo=repo,
             fields={

@@ -21,3 +21,5 @@ Implement issue requirements into working code with minimal, safe changes.
 - Prefer existing project patterns and scripts.
 - Keep implementation simple (KISS), avoid overengineering.
 - Respect PR policy and template requirements.
+- For Telegram bot conversational logic, prioritize active task/project data collection over optional approval replies so `/task` cannot be blocked.
+- For behavior changes, add or update failing tests first and keep them in CI-covered suites.
