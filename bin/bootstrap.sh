@@ -10,7 +10,8 @@ fi
 
 mkdir -p \
   "${ROOT_DIR}/var/gitea" \
-  "${ROOT_DIR}/var/runner" \
+  "${ROOT_DIR}/var/runner-1" \
+  "${ROOT_DIR}/var/runner-2" \
   "${ROOT_DIR}/var/postgres"
 
 echo "Bootstrap complete."

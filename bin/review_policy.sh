@@ -10,9 +10,13 @@ required_paths=(
   "docs/README.md"
   "docs/architecture/ai-fabric-poc.md"
   "docs/workflows/ci-cd.md"
+  "docs/workflows/pr-best-practices.md"
   "docs/skills/agent-guidelines.md"
   "bin/up.sh"
   "bin/down.sh"
+  "bin/pr_policy.sh"
+  ".gitea/PULL_REQUEST_TEMPLATE.md"
+  "CODEOWNERS"
 )
 
 for p in "${required_paths[@]}"; do
