@@ -89,3 +89,21 @@ services:
       - -c
       - "apt-get update >/dev/null && apt-get install -y --no-install-recommends bash git docker.io ca-certificates >/dev/null && rm -rf /var/lib/apt/lists/* && test -x /host-local-bin/agent && ./bin/issue_handler.sh"
 
+  telegram-bot:
+    image: docker.io/library/python:3.13-slim
+    container_name: ai-fabric-telegram-bot
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    env_file:
+      - .env
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - /bin/sh
+      - -c
+      - "apt-get update >/dev/null && apt-get install -y --no-install-recommends bash docker.io ripgrep git ca-certificates >/dev/null && rm -rf /var/lib/apt/lists/* && ./bin/telegram_bot.sh"
+
