@@ -28,6 +28,7 @@ ALLOWED_CHAT_IDS = {
 }
 ALLOWED_USERNAMES = {x.strip().lower() for x in ALLOWED_USERNAMES_RAW.split(",") if x.strip()}
 TASK_DRAFTS: dict[int, "TaskDraft"] = {}
+LABEL_ID_CACHE: dict[str, int] = {}
 
 
 @dataclass
@@ -163,11 +164,40 @@ def trigger_issue_handler(issue_number: int) -> None:
     )
 
 
+def resolve_issue_label_ids(task_type: str) -> list[int]:
+    name = task_type.strip().lower()
+    if not name:
+        return []
+
+    cached = LABEL_ID_CACHE.get(name)
+    if cached is not None:
+        return [cached]
+
+    labels = gitea_request("GET", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/labels")
+    if not isinstance(labels, list):
+        return []
+
+    for label in labels:
+        if not isinstance(label, dict):
+            continue
+        label_name = str(label.get("name", "")).strip().lower()
+        if label_name != name:
+            continue
+        label_id = label.get("id")
+        if isinstance(label_id, int):
+            LABEL_ID_CACHE[name] = label_id
+            return [label_id]
+    return []
+
+
 def create_gitea_issue(task: TaskDraft) -> tuple[str, int]:
     payload = {
         "title": compact_title(task.raw, task.task_type),
         "body": build_issue_body(task),
     }
+    label_ids = resolve_issue_label_ids(task.task_type)
+    if label_ids:
+        payload["labels"] = label_ids
     issue = gitea_request("POST", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/issues", payload)
     url = issue.get("html_url", "")
     number = int(issue.get("number", 0) or 0)
