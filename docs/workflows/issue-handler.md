@@ -48,6 +48,8 @@ Environment variables:
 - `ISSUE_ARCHITECT_ENABLED` (`1` by default)
 - `ISSUE_ARCHITECT_MAX_CHARS` (max architect text persisted into issue body)
 - `ISSUE_HANDLER_TRIGGER_ON_CREATE` (`1` by default, used by Telegram bot for immediate trigger)
+- `ISSUE_TRIGGER_EVENT`, `ISSUE_TRIGGER_REPO`, `ISSUE_TRIGGER_BASE_BRANCH` (optional trigger metadata hints validated at handler startup)
+- `ISSUE_HANDLER_TRIGGER_SCRIPT` (optional trigger script hint, defaults to `bin/issue_handler.sh`)
 - `CURSOR_SETTINGS_DIR` and `CURSOR_CONFIG_DIR` (mounted into handler container for Cursor agent settings)
 
 ## Manual Trigger

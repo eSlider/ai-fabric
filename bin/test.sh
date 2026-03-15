@@ -23,4 +23,6 @@ for path in "${required[@]}"; do
   [[ -f "${path}" ]] || { echo "Missing required file: ${path}"; exit 1; }
 done
 
+python3 -m unittest discover -s "${ROOT_DIR}/bin" -p "test_*.py"
+
 echo "test check passed."

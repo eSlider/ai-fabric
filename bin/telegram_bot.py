@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 
@@ -148,12 +149,17 @@ def trigger_issue_handler(issue_number: int) -> None:
     if not ISSUE_HANDLER_TRIGGER_ON_CREATE:
         return
     # Fire-and-forget single-issue architect/developer pipeline.
+    env = os.environ.copy()
+    env["ISSUE_TRIGGER_EVENT"] = "single_issue"
+    env["ISSUE_TRIGGER_REPO"] = f"{GITEA_OWNER}/{GITEA_REPO}"
+    env["ISSUE_TRIGGER_BASE_BRANCH"] = os.environ.get("ISSUE_BASE_BRANCH", "main")
+    env["ISSUE_HANDLER_TRIGGER_SCRIPT"] = str((Path(ROOT_DIR) / "bin" / "issue_handler.sh").resolve())
     subprocess.Popen(
         ["/bin/bash", "-lc", f"./bin/issue_handler.sh --once --issue-number {issue_number}"],
         cwd=ROOT_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env=os.environ.copy(),
+        env=env,
     )
 
 
