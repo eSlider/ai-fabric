@@ -96,6 +96,28 @@ class TelegramProjectsFlowTests(unittest.TestCase):
         self.assertNotIn(chat_id, telegram_bot.PROJECT_CREATION_PENDING)
         self.assertEqual(send_message_mock.call_count, 3)
 
+    @patch("telegram_bot.handle_non_command_message")
+    @patch("telegram_bot.handle_approval_reply")
+    def test_route_non_command_prioritizes_active_task_flow(
+        self,
+        handle_approval_reply_mock,
+        handle_non_command_message_mock,
+    ) -> None:
+        chat_id = 104
+        telegram_bot.TASK_DRAFTS[chat_id] = telegram_bot.TaskDraft(
+            task_type="feature",
+            raw="add observability panel",
+            chat_id=chat_id,
+            owner="alice",
+            repo="platform",
+        )
+        handle_approval_reply_mock.return_value = True
+
+        telegram_bot.route_non_command_message(chat_id, "dashboard should include error rate")
+
+        handle_non_command_message_mock.assert_called_once_with(chat_id, "dashboard should include error rate")
+        handle_approval_reply_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

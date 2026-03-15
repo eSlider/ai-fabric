@@ -477,6 +477,17 @@ def handle_non_command_message(chat_id: int, text: str) -> None:
     send_message(chat_id, "Unknown command. Use /help.")
 
 
+def route_non_command_message(chat_id: int, text: str) -> None:
+    # Keep conversational task/project flows deterministic. Approval replies should
+    # not hijack text while user is already providing required task details.
+    if PROJECT_CREATION_PENDING.get(chat_id) or chat_id in TASK_DRAFTS:
+        handle_non_command_message(chat_id, text)
+        return
+    if handle_approval_reply(chat_id, text):
+        return
+    handle_non_command_message(chat_id, text)
+
+
 def handle_command(chat_id: int, text: str) -> None:
     cmd = text.strip()
     if cmd.startswith("/start") or cmd.startswith("/help"):
@@ -628,10 +639,8 @@ def main() -> int:
                 if text.startswith("/"):
                     handle_command(chat_id, text)
                     continue
-                if handle_approval_reply(chat_id, text):
-                    continue
                 try:
-                    handle_non_command_message(chat_id, text)
+                    route_non_command_message(chat_id, text)
                 except Exception as exc:  # noqa: BLE001
                     TASK_DRAFTS.pop(chat_id, None)
                     PROJECT_CREATION_PENDING.pop(chat_id, None)
