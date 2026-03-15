@@ -64,14 +64,23 @@ services:
     command:
       - "set -eu; if [ ! -f /data/config.yaml ]; then act_runner generate-config | sed 's#network: \"\"#network: \"ai-fabric_default\"#' > /data/config.yaml; fi; if [ -z \"$${GITEA_RUNNER_REGISTRATION_TOKEN:-}\" ] || [ \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /data/.runner ]; then act_runner register --no-interactive --instance \"$${GITEA_INSTANCE_URL}\" --token \"$${GITEA_RUNNER_REGISTRATION_TOKEN}\" --name \"$${GITEA_RUNNER_NAME}\"; fi; exec act_runner daemon --config /data/config.yaml"
 
-  postgres:
-    image: docker.io/library/postgres:16-alpine
-    container_name: ai-fabric-postgres
+  issue-handler:
+    image: docker.io/library/python:3.13-alpine
+    container_name: ai-fabric-issue-handler
     restart: unless-stopped
-    profiles: ["postgres"]
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-gitea}
-      POSTGRES_USER: ${POSTGRES_USER:-gitea}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gitea}
+    depends_on:
+      gitea:
+        condition: service_healthy
+    env_file:
+      - .env
+    working_dir: /workspace
     volumes:
-      - ./var/postgres:/var/lib/postgresql/data
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CURSOR_SETTINGS_DIR:-/home/ano/.cursor}:/root/.cursor:ro
+      - ${CURSOR_CONFIG_DIR:-/home/ano/.config/Cursor}:/root/.config/Cursor:ro
+    command:
+      - /bin/sh
+      - -c
+      - "apk add --no-cache bash git docker-cli >/dev/null && ./bin/issue_handler.sh"
+

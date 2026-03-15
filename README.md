@@ -39,9 +39,22 @@ Lean AI project fabric based on Gitea + Gitea Actions, optimized for:
    - `/status`, `/health`, `/up`, `/down`, `/checks`, `/logs <service>`
    - `/task <description>` to classify and create a clear Gitea issue via follow-up questions
 
+## Issue Handler Automation
+
+1. Configure in `.env`:
+   - `GITEA_BOT_TOKEN=<gitea_access_token>`
+   - `ISSUE_AGENT_BIN=cursor-agent`
+   - `ISSUE_ARCHITECT_ENABLED=1`
+   - `CURSOR_SETTINGS_DIR=/home/ano/.cursor`
+   - `CURSOR_CONFIG_DIR=/home/ano/.config/Cursor`
+2. Start service:
+   - `docker compose -f docker-compose.yml up -d issue-handler`
+3. One-shot dry-run:
+   - `ISSUE_HANDLER_DRY_RUN=1 ./bin/issue_handler.sh --once`
+
 ## Notes
 
 - Default DB mode is SQLite for fast local PoC startup.
-- Optional PostgreSQL profile is available in `docker-compose.yml`.
+- Runtime state is stored under `var/` (`gitea`, `runner-1`, `runner-2`, issue handler state).
 - Two Actions runners are configured: `gitea-runner-1` and `gitea-runner-2`.
 - PR process is workflow-enforced via `.gitea/PULL_REQUEST_TEMPLATE.md`, `CODEOWNERS`, and `bin/pr_policy.sh`.

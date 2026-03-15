@@ -19,6 +19,7 @@ GITEA_BASE_URL = os.environ.get("GITEA_BOT_BASE_URL", "http://localhost:3000").s
 GITEA_OWNER = os.environ.get("GITEA_BOT_OWNER", "eslider").strip()
 GITEA_REPO = os.environ.get("GITEA_BOT_REPO", "ai-fabric").strip()
 GITEA_TOKEN = os.environ.get("GITEA_BOT_TOKEN", "").strip()
+ISSUE_HANDLER_TRIGGER_ON_CREATE = os.environ.get("ISSUE_HANDLER_TRIGGER_ON_CREATE", "1").strip() == "1"
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 ALLOWED_CHAT_IDS = {
@@ -143,13 +144,30 @@ def build_issue_body(task: TaskDraft) -> str:
     )
 
 
-def create_gitea_issue(task: TaskDraft) -> str:
+def trigger_issue_handler(issue_number: int) -> None:
+    if not ISSUE_HANDLER_TRIGGER_ON_CREATE:
+        return
+    # Fire-and-forget single-issue architect/developer pipeline.
+    subprocess.Popen(
+        ["/bin/bash", "-lc", f"./bin/issue_handler.sh --once --issue-number {issue_number}"],
+        cwd=ROOT_DIR,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=os.environ.copy(),
+    )
+
+
+def create_gitea_issue(task: TaskDraft) -> tuple[str, int]:
     payload = {
         "title": compact_title(task.raw, task.task_type),
         "body": build_issue_body(task),
     }
     issue = gitea_request("POST", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/issues", payload)
-    return issue.get("html_url", "")
+    url = issue.get("html_url", "")
+    number = int(issue.get("number", 0) or 0)
+    if number > 0:
+        trigger_issue_handler(number)
+    return url, number
 
 
 def start_task_flow(chat_id: int, text: str) -> str:
@@ -169,8 +187,10 @@ def continue_task_flow(chat_id: int, text: str) -> str:
     draft = TASK_DRAFTS[chat_id]
     needed = missing_fields(draft)
     if not needed:
-        url = create_gitea_issue(draft)
+        url, number = create_gitea_issue(draft)
         TASK_DRAFTS.pop(chat_id, None)
+        if url and number > 0:
+            return f"Issue created: {url}\nSolution Architect pipeline triggered for issue #{number}."
         return f"Issue created: {url}" if url else "Issue created."
 
     current = needed[0]
@@ -179,8 +199,10 @@ def continue_task_flow(chat_id: int, text: str) -> str:
     if needed:
         return question_for(needed[0], draft.task_type)
 
-    url = create_gitea_issue(draft)
+    url, number = create_gitea_issue(draft)
     TASK_DRAFTS.pop(chat_id, None)
+    if url and number > 0:
+        return f"Issue created: {url}\nSolution Architect pipeline triggered for issue #{number}."
     return f"Issue created: {url}" if url else "Issue created."
 
 
@@ -230,7 +252,7 @@ def handle_command(chat_id: int, text: str) -> None:
                 "/down - stop stack\n"
                 "/checks - run fmt/lint/test/review policy\n"
                 "/task <description> - classify and create a clear Gitea issue\n"
-                "/logs <service> - tail logs for gitea|gitea-runner|postgres|telegram-bot"
+                "/logs <service> - tail logs for gitea|gitea-runner-1|gitea-runner-2|issue-handler|telegram-bot"
             ),
         )
         return
@@ -281,9 +303,9 @@ def handle_command(chat_id: int, text: str) -> None:
             send_message(chat_id, "Usage: /logs <service>")
             return
         svc = parts[1].strip()
-        allowed = {"gitea", "gitea-runner", "postgres", "telegram-bot"}
+        allowed = {"gitea", "gitea-runner-1", "gitea-runner-2", "issue-handler", "telegram-bot"}
         if svc not in allowed:
-            send_message(chat_id, "Allowed services: gitea, gitea-runner, postgres, telegram-bot")
+            send_message(chat_id, "Allowed services: gitea, gitea-runner-1, gitea-runner-2, issue-handler, telegram-bot")
             return
         code, out = run_cmd(
             ["docker", "compose", "-f", "docker-compose.yml", "logs", "--tail=60", svc],

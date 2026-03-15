@@ -9,13 +9,12 @@
 ## Components
 
 - `gitea`: SCM, issues, PRs, Actions control plane.
-- `gitea-runner`: executes Actions jobs.
-- optional `postgres`: alternative DB profile.
+- `gitea-runner-1` and `gitea-runner-2`: execute Actions jobs.
 
 ## Operational Layout
 
 - Persistent state under `var/`:
   - `var/gitea/`
-  - `var/runner/`
-  - `var/postgres/` (if postgres profile enabled)
+  - `var/runner-1/`
+  - `var/runner-2/`
 - Scripts in `bin/` drive lifecycle and checks.
