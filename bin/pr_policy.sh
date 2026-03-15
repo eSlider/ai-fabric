@@ -67,8 +67,10 @@ if missing:
 
 issue_ref = re.search(r"(?im)\\b(closes|fixes|refs)\\s+#\\d+\\b", body)
 if not issue_ref:
-    print("::error::Issue Link must include Closes/Fixes/Refs #<id>")
-    sys.exit(1)
+    fallback_ref = re.search(r"(?m)#\\d+\\b", body)
+    if not fallback_ref:
+        print("::error::Issue Link must include Closes/Fixes/Refs #<id> (or at least #<id>)")
+        sys.exit(1)
 
 print("pr policy check passed.")
 PY

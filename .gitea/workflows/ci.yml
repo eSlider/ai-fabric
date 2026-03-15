@@ -11,6 +11,11 @@ jobs:
   backpressure:
     runs-on: ubuntu-latest
     steps:
+      - name: Install CI dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ripgrep python3-venv
+
       - name: Checkout
         uses: actions/checkout@v4
 
