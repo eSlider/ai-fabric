@@ -36,7 +36,7 @@ Lean AI project fabric based on Gitea + Gitea Actions, optimized for:
 2. Start bot:
    - `./bin/telegram_bot.sh`
 3. Commands:
-   - `/status`, `/health`, `/up`, `/down`, `/checks`, `/logs <service>`
+  - `/status`, `/health`, `/up`, `/down`, `/checks`, `/projects`, `/logs <service>`
    - `/task <description>` to classify and create a clear Gitea issue via follow-up questions
 
 ## Issue Handler Automation
