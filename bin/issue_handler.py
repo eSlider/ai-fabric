@@ -25,7 +25,7 @@ GITEA_TOKEN = os.environ.get("GITEA_BOT_TOKEN", "").strip()
 BASE_BRANCH = os.environ.get("ISSUE_BASE_BRANCH", "main")
 POLL_INTERVAL = int(os.environ.get("ISSUE_POLL_INTERVAL_SEC", "45"))
 MAX_FIX_ATTEMPTS = int(os.environ.get("ISSUE_MAX_FIX_ATTEMPTS", "3"))
-AGENT_BIN = os.environ.get("ISSUE_AGENT_BIN", "cursor-agent").strip()
+AGENT_BIN = os.environ.get("ISSUE_AGENT_BIN", "agent").strip()
 AGENT_EXTRA_ARGS = os.environ.get("ISSUE_AGENT_EXTRA_ARGS", "").strip()
 DRY_RUN = os.environ.get("ISSUE_HANDLER_DRY_RUN", "0").strip() == "1"
 ARCHITECT_ENABLED = os.environ.get("ISSUE_ARCHITECT_ENABLED", "1").strip() == "1"
@@ -106,7 +106,7 @@ def save_state(state: dict[str, Any]) -> None:
 def list_open_issues() -> list[dict[str, Any]]:
     query = urllib.parse.urlencode({"state": "open", "limit": "50"})
     issues = gitea_request("GET", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/issues?{query}")
-    return [i for i in issues if "pull_request" not in i]
+    return [i for i in issues if not i.get("pull_request")]
 
 
 def classify_issue(issue: dict[str, Any]) -> str:
@@ -228,9 +228,11 @@ def write_architect_prompt(path: Path, issue: dict[str, Any], issue_type: str, s
 def run_agent(path: Path, prompt_file: Path) -> tuple[int, str]:
     if shutil.which(AGENT_BIN) is None:
         return 127, f"Agent binary not found: {AGENT_BIN}"
-    cmd = [AGENT_BIN, "run", "--cwd", str(path), "--prompt-file", str(prompt_file)]
+    prompt_text = prompt_file.read_text(encoding="utf-8")
+    cmd = [AGENT_BIN, "-p", "--workspace", str(path), "--trust", prompt_text]
     if AGENT_EXTRA_ARGS:
-        cmd.extend(shlex.split(AGENT_EXTRA_ARGS))
+        extra = shlex.split(AGENT_EXTRA_ARGS)
+        cmd = [AGENT_BIN, "-p", "--workspace", str(path), "--trust", *extra, prompt_text]
     return run(cmd, cwd=path, timeout=3600)
 
 
@@ -304,11 +306,26 @@ def create_pr(issue: dict[str, Any], branch: str, issue_type: str, skills: list[
     if existing:
         return existing.get("html_url", "")
     body = (
+        "## Problem\n"
+        f"Automated implementation for issue #{issue['number']}: {issue.get('title', '')}\n\n"
+        "## Solution\n"
+        f"Agent-based implementation using branch `{branch}` with scoped changes.\n\n"
+        "## Risks\n"
+        "- Generated changes may require human review for edge cases.\n"
+        "- CI and policy checks are enforced before merge.\n\n"
+        "## Test Plan\n"
+        "- [x] `./bin/fmt.sh`\n"
+        "- [x] `./bin/lint.sh`\n"
+        "- [x] `./bin/test.sh`\n\n"
+        "## Rollback\n"
+        f"Revert branch `{branch}` merge commit if needed.\n\n"
+        "## Issue Link\n"
         f"Closes #{issue['number']}\n\n"
-        f"Automated by issue handler.\n\n"
-        f"Type: {issue_type}\n"
-        "Skills/docs considered:\n"
-        + "\n".join(f"- `{s}`" for s in skills)
+        "## AI Notes\n"
+        f"- Type: `{issue_type}`\n"
+        "- Automated by issue handler.\n"
+        "- Skills/docs considered:\n"
+        + "\n".join(f"  - `{s}`" for s in skills)
     )
     payload = {
         "title": f"[agent] {issue.get('title', '')}",
@@ -403,7 +420,7 @@ def run_once(target_issue: int | None = None) -> None:
     state = load_state()
     if target_issue is not None:
         issue = get_issue(target_issue)
-        issues = [issue] if issue.get("state") == "open" and "pull_request" not in issue else []
+        issues = [issue] if issue.get("state") == "open" and not issue.get("pull_request") else []
     else:
         issues = list_open_issues()
     for issue in issues:

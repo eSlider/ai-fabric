@@ -17,9 +17,6 @@ jobs:
       - name: fmt
         run: ./bin/fmt.sh
 
-      - name: Install ruff
-        run: python3 -m pip install --quiet ruff
-
       - name: lint
         run: ./bin/lint.sh
 
