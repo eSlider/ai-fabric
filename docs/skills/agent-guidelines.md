@@ -7,6 +7,7 @@
 - Prefer CLI tools over MCP integrations or direct API calls whenever feasible.
 - Avoid adding dependencies unless essential.
 - Use `ruff` as the Python linter standard in CI.
+- For Python environments and package workflows, prefer `uv venv` and `uv pip`.
 - For browser testing, prefer `agent-browser` over heavyweight MCP browser tooling.
 
 ## Context Hygiene

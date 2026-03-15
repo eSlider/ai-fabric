@@ -41,6 +41,7 @@ Environment variables:
 - `ISSUE_BASE_BRANCH` (default `main`)
 - `ISSUE_POLL_INTERVAL_SEC` (default `45`)
 - `ISSUE_MAX_FIX_ATTEMPTS` (default `3`)
+- `ISSUE_RETRY_INTERVAL_SEC` (default `600`, retry delay for failed issues)
 - `ISSUE_AGENT_BIN` (default `agent`)
 - `ISSUE_AGENT_EXTRA_ARGS`
 - `ISSUE_HANDLER_DRY_RUN` (`1` for safe dry-run)

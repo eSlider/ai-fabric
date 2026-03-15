@@ -15,13 +15,23 @@ python3 -m py_compile bin/*.py
 if command -v ruff >/dev/null 2>&1; then
   ruff check bin/*.py
 elif [[ "${CI:-}" == "true" ]]; then
-  python3 -m venv .venv-ruff
-  # shellcheck disable=SC1091
-  source .venv-ruff/bin/activate
-  pip install --quiet ruff
-  ruff check bin/*.py
-  deactivate
-  rm -rf .venv-ruff
+  if command -v uv >/dev/null 2>&1; then
+    uv venv .venv-ruff
+    # shellcheck disable=SC1091
+    source .venv-ruff/bin/activate
+    uv pip install --quiet ruff
+    ruff check bin/*.py
+    deactivate
+    rm -rf .venv-ruff
+  else
+    python3 -m venv .venv-ruff
+    # shellcheck disable=SC1091
+    source .venv-ruff/bin/activate
+    pip install --quiet ruff
+    ruff check bin/*.py
+    deactivate
+    rm -rf .venv-ruff
+  fi
 else
   echo "warning: ruff is not installed locally; skipping ruff check"
 fi
