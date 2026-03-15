@@ -25,14 +25,16 @@ Automatically process each open issue by delegating implementation to an agent, 
    - possible solutions
    - recommended approach
    - estimation
-7. Prepare isolated git worktree (`issue/<id>-<slug>`).
-8. Run developer agent (default `agent`) with generated prompt.
-9. Run quality gates:
+7. If Telegram chat marker exists, request approval (`option number` / `confirm` / `cancel`).
+8. On approval: prepare isolated git worktree (`issue/<id>-<slug>`).
+9. Run developer agent (default `agent`) with generated prompt.
+   - Prompt artifacts are generated as `.issue-agent-prompt.md` and `.issue-architect-prompt.md` in the issue worktree and are ephemeral runtime files (not source docs).
+10. Run quality gates:
    - `./bin/fmt.sh`
    - `./bin/lint.sh`
    - `./bin/test.sh`
-10. If checks fail, ask agent to fix and retry until `ISSUE_MAX_FIX_ATTEMPTS`.
-11. Commit, push branch, create PR, comment URL back to issue.
+11. If checks fail, ask agent to fix and retry until `ISSUE_MAX_FIX_ATTEMPTS`.
+12. Commit, push branch, create PR, comment URL back to issue.
 
 ## Configuration
 
@@ -48,6 +50,7 @@ Environment variables:
 - `ISSUE_ARCHITECT_ENABLED` (`1` by default)
 - `ISSUE_ARCHITECT_MAX_CHARS` (max architect text persisted into issue body)
 - `ISSUE_HANDLER_TRIGGER_ON_CREATE` (`1` by default, used by Telegram bot for immediate trigger)
+- `ISSUE_APPROVALS_FILE` (`var/issue-handler/approvals.json`, shared approval state)
 - `ISSUE_TRIGGER_EVENT`, `ISSUE_TRIGGER_REPO`, `ISSUE_TRIGGER_BASE_BRANCH` (optional trigger metadata hints validated at handler startup)
 - `ISSUE_HANDLER_TRIGGER_SCRIPT` (optional trigger script hint, defaults to `bin/issue_handler.sh`)
 - `CURSOR_SETTINGS_DIR` and `CURSOR_CONFIG_DIR` (mounted into handler container for Cursor agent settings)
@@ -67,3 +70,12 @@ Environment variables:
   - Solution Architect section is inserted once using body markers.
   - Existing marker block prevents architect re-run.
   - Tracked issues with `in_progress|pr_opened|failed` are not auto-retriggered, even if issue body is edited.
+
+## Approval Gate (Telegram)
+
+- If issue body contains marker `<!-- ai-fabric:telegram-chat-id:<chat_id> -->`, handler sends Solution Architect output to that chat.
+- User decision commands:
+  - option number (`1`, `2`, ...)
+  - `confirm` (use recommended approach)
+  - `cancel` (issue is closed)
+- Developer stage starts only after approval.

@@ -17,6 +17,7 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT_DIR / "var" / "issue-handler"
 STATE_PATH = STATE_DIR / "state.json"
+APPROVALS_PATH = STATE_DIR / "approvals.json"
 
 GITEA_BASE_URL = os.environ.get("GITEA_BOT_BASE_URL", "http://localhost:3000").rstrip("/")
 GITEA_OWNER = os.environ.get("GITEA_BOT_OWNER", "eslider")
@@ -31,9 +32,11 @@ AGENT_EXTRA_ARGS = os.environ.get("ISSUE_AGENT_EXTRA_ARGS", "").strip()
 DRY_RUN = os.environ.get("ISSUE_HANDLER_DRY_RUN", "0").strip() == "1"
 ARCHITECT_ENABLED = os.environ.get("ISSUE_ARCHITECT_ENABLED", "1").strip() == "1"
 ARCHITECT_MAX_CHARS = int(os.environ.get("ISSUE_ARCHITECT_MAX_CHARS", "6000"))
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 
 ARCH_START = "<!-- ai-fabric:solution-architect:start -->"
 ARCH_END = "<!-- ai-fabric:solution-architect:end -->"
+TG_CHAT_MARKER = r"<!--\s*ai-fabric:telegram-chat-id:(-?\d+)\s*-->"
 
 
 def _derive_trigger_event(once: bool, issue_number: int | None) -> str:
@@ -193,6 +196,32 @@ def save_state(state: dict[str, Any]) -> None:
     STATE_PATH.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
+def load_approvals() -> dict[str, Any]:
+    if not APPROVALS_PATH.exists():
+        return {"issues": {}}
+    return json.loads(APPROVALS_PATH.read_text(encoding="utf-8"))
+
+
+def save_approvals(data: dict[str, Any]) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    APPROVALS_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def telegram_send(chat_id: int, text: str) -> None:
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    payload = urllib.parse.urlencode(
+        {"chat_id": str(chat_id), "text": text[:4000], "disable_web_page_preview": "true"}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urllib.request.urlopen(req, timeout=20):
+        pass
+
+
 def list_open_issues() -> list[dict[str, Any]]:
     query = urllib.parse.urlencode({"state": "open", "limit": "50"})
     issues = gitea_request("GET", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/issues?{query}")
@@ -232,6 +261,70 @@ def select_skills(issue: dict[str, Any]) -> list[str]:
 def has_architect_block(issue: dict[str, Any]) -> bool:
     body = issue.get("body") or ""
     return ARCH_START in body and ARCH_END in body
+
+
+def extract_chat_id(issue: dict[str, Any]) -> int | None:
+    body = issue.get("body") or ""
+    m = re.search(TG_CHAT_MARKER, body)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def section_text(md: str, heading: str) -> str:
+    pattern = re.compile(rf"(?ims)^##\s+{re.escape(heading)}\s*\n(.*?)(?=^##\s+|\Z)")
+    m = pattern.search(md)
+    return (m.group(1).strip() if m else "")
+
+
+def parse_solution_options(architect_md: str) -> list[str]:
+    sec = section_text(architect_md, "Possible Solutions")
+    options = []
+    for line in sec.splitlines():
+        line = line.strip()
+        if line.startswith("- "):
+            options.append(line[2:].strip())
+    return options
+
+
+def get_approval(issue_number: int) -> dict[str, Any] | None:
+    data = load_approvals()
+    return (data.get("issues") or {}).get(str(issue_number))
+
+
+def upsert_approval(issue_number: int, record: dict[str, Any]) -> None:
+    data = load_approvals()
+    issues = data.setdefault("issues", {})
+    issues[str(issue_number)] = record
+    save_approvals(data)
+
+
+def send_solution_for_approval(issue: dict[str, Any], architect_md: str, options: list[str], chat_id: int) -> None:
+    issue_url = issue.get("html_url", "")
+    estimation = section_text(architect_md, "Estimation") or "- Not provided"
+    impact = section_text(architect_md, "Impact") or "- Not provided"
+    recommended = section_text(architect_md, "Recommended Approach") or "- Not provided"
+    options_txt = "\n".join(f"{i+1}) {opt}" for i, opt in enumerate(options)) if options else "1) Use recommended approach"
+    msg = (
+        f"Issue #{issue['number']} Solution Architect output is ready.\n"
+        f"{issue_url}\n\n"
+        f"Options:\n{options_txt}\n\n"
+        f"Recommended:\n{recommended[:1000]}\n\n"
+        f"Estimation:\n{estimation[:1000]}\n\n"
+        f"Impact:\n{impact[:1000]}\n\n"
+        "Reply with:\n"
+        "- option number (e.g. 1)\n"
+        "- confirm (use recommended)\n"
+        "- cancel (close issue)"
+    )
+    telegram_send(chat_id, msg)
+
+
+def close_issue(issue_number: int) -> None:
+    gitea_request("PATCH", f"/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/issues/{issue_number}", {"state": "closed"})
 
 
 def issue_branch(issue_number: int, title: str) -> str:
@@ -306,6 +399,10 @@ def write_architect_prompt(path: Path, issue: dict[str, Any], issue_type: str, s
         "- Complexity: (S|M|L)\n"
         "- Estimated effort: <time>\n"
         "- Test scope: <brief>\n\n"
+        "## Impact\n"
+        "- User impact\n"
+        "- Delivery impact\n"
+        "- Operational impact\n\n"
         "## Required Skills/Context\n"
         "- list relevant docs/skills from repository\n\n"
         "Do not include any content outside these sections.\n\n"
@@ -459,6 +556,7 @@ def process_issue(issue: dict[str, Any], state: dict[str, Any]) -> None:
     ensure_worktree(branch, path)
 
     architect_already_done = bool(issue_state.get("architect_done")) or has_architect_block(issue)
+    architect_md = ""
     if ARCHITECT_ENABLED and not architect_already_done:
         comment_issue(num, "[issue-handler] Running Solution Architect analysis and updating issue body.")
         architect_prompt = write_architect_prompt(path, issue, issue_type, skills)
@@ -471,10 +569,60 @@ def process_issue(issue: dict[str, Any], state: dict[str, Any]) -> None:
         issue_state["architect_done"] = True
         issue_state["architect_at"] = int(time.time())
         save_state(state)
+    elif ARCHITECT_ENABLED:
+        architect_md = section_text((issue.get("body") or ""), "Solution Architect")
+
+    # Optional approval gate via Telegram before developer stage.
+    chat_id = extract_chat_id(issue)
+    if chat_id is not None:
+        approval = get_approval(num)
+        if approval is None:
+            options = parse_solution_options(architect_md)
+            record = {
+                "status": "pending",
+                "issue_number": num,
+                "chat_id": chat_id,
+                "options": options,
+                "created_at": int(time.time()),
+                "updated_at": int(time.time()),
+            }
+            upsert_approval(num, record)
+            send_solution_for_approval(issue, architect_md, options, chat_id)
+            issue_state["status"] = "awaiting_approval"
+            issue_state["updated_at"] = int(time.time())
+            save_state(state)
+            return
+
+        status = (approval.get("status") or "").lower()
+        if status == "pending":
+            issue_state["status"] = "awaiting_approval"
+            issue_state["updated_at"] = int(time.time())
+            save_state(state)
+            return
+        if status == "cancelled":
+            close_issue(num)
+            comment_issue(num, "[issue-handler] Request cancelled via Telegram. Issue closed.")
+            issue_state["status"] = "cancelled"
+            issue_state["updated_at"] = int(time.time())
+            save_state(state)
+            return
 
     comment_issue(num, f"[issue-handler] Claimed issue. Starting developer implementation on branch `{branch}`.")
 
+    selected_option = ""
+    approval = get_approval(num)
+    if approval and (approval.get("status") or "").lower() == "approved":
+        selected_option = str(approval.get("selected_option_text") or "").strip()
+
     prompt_file = write_prompt(path, issue, issue_type, skills)
+    if selected_option:
+        prompt_file = write_prompt(
+            path,
+            issue,
+            issue_type,
+            skills,
+            extra=f"Approved solution option from user:\n{selected_option}",
+        )
     code, out = run_agent(path, prompt_file)
     if code != 0:
         raise RuntimeError(f"Agent execution failed: {out[:800]}")
@@ -521,7 +669,7 @@ def run_once(target_issue: int | None = None) -> None:
         current = state.get("issues", {}).get(str(num), {})
         # Never re-trigger automatically once an issue is tracked.
         # This prevents duplicate architect runs and avoids retriggering on issue edits.
-        if target_issue is None and current.get("status") in {"in_progress", "pr_opened"}:
+        if target_issue is None and current.get("status") in {"in_progress", "pr_opened", "cancelled"}:
             continue
         if target_issue is None and current.get("status") == "failed":
             last = int(current.get("updated_at", 0) or 0)
