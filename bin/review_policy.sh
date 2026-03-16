@@ -18,8 +18,6 @@ required_paths=(
   "bin/up.sh"
   "bin/down.sh"
   "bin/pr_policy.sh"
-  "bin/issue_handler.py"
-  "bin/issue_handler.sh"
   ".gitea/PULL_REQUEST_TEMPLATE.md"
   "CODEOWNERS"
 )

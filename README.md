@@ -1,15 +1,15 @@
 # AI Fabric (PoC)
 
 AI Fabric is a self-hosted, CLI-first automation workspace for software delivery.
-It combines Gitea, Gitea Actions, a Telegram control bot, and agent-driven issue handling
-so ideas can move from task -> issue -> PR -> merge with quality gates enforced.
+It combines Gitea, Gitea Actions, and agent-driven automation so ideas can move
+from task -> issue -> PR -> merge with quality gates enforced.
 
 ## Project Purpose
 
 - Keep planning, code, issues, and pull requests in one local platform (Gitea).
 - Automate repetitive delivery work with AI agents while keeping human approval points.
 - Enforce backpressure with lightweight checks: `fmt`, `lint`, `test`, and PR policy.
-- Stay simple and auditable: Bash/Python scripts, Docker Compose, minimal dependencies.
+- Stay simple and auditable: Bash/Go scripts, Docker Compose, minimal dependencies.
 
 ## Structure
 
@@ -29,36 +29,16 @@ so ideas can move from task -> issue -> PR -> merge with quality gates enforced.
 
 ## Telegram Bot Control
 
-1. Set in `.env`:
-   - `TELEGRAM_BOT_NAME=trrrrmonexbot`
-   - `TELEGRAM_BOT_TOKEN=<token>`
-   - `TELEGRAM_ALLOWED_CHAT_IDS=<your_chat_id>`
-   - `TELEGRAM_ALLOWED_USERNAMES=eSIider`
-   - `GITEA_BOT_BASE_URL=http://localhost:3000`
-   - `GITEA_BOT_OWNER=eslider`
-   - `GITEA_BOT_REPO=ai-fabric`
-   - `GITEA_BOT_TOKEN=<gitea_access_token>`
-2. Bot service is part of Docker Compose (`telegram-bot`) and starts with:
-   - `./bin/up.sh`
-3. Commands:
-  - `/status`, `/health`, `/up`, `/down`, `/checks`, `/projects`, `/logs <service>`
-   - `/task <description>` to classify and create a clear Gitea issue via follow-up questions
-   - Approval replies for Solution Architect output: option number, `confirm`, or `cancel`
+Telegram bot Python service was removed and is pending Go replacement.
 
 ## Issue Handler Automation
 
-1. Configure in `.env`:
-   - `GITEA_BOT_TOKEN=<gitea_access_token>`
-   - `ISSUE_AGENT_BIN=agent`
-   - `ISSUE_ARCHITECT_ENABLED=1`
-   - `CURSOR_SETTINGS_DIR=${HOME}/.cursor`
-   - `CURSOR_CONFIG_DIR=${HOME}/.config/Cursor`
-   - `CURSOR_LOCAL_BIN_DIR=${HOME}/.local/bin`
-   - `CURSOR_AGENT_HOME_DIR=${HOME}/.local/share/cursor-agent`
-2. Start service:
-   - `docker compose -f docker-compose.yml up -d issue-handler`
-3. One-shot dry-run:
-   - `ISSUE_HANDLER_DRY_RUN=1 ./bin/issue_handler.sh --once`
+Issue handler Python service was removed and is pending Go replacement.
+
+Authentication note:
+- Preferred: keep `CURSOR_AGENT_HOME_DIR` mounted so containerized `agent` reuses host login/session state.
+- Fallback: set `CURSOR_API_KEY` in `.env` for non-interactive authentication.
+- Gitea operations are executed via CLI (`tea api`) when `GITEA_CLI_ENABLED=1`; HTTP transport is used only when CLI mode is disabled.
 
 ## Self-Update And Redeploy Flow
 
@@ -66,14 +46,15 @@ so ideas can move from task -> issue -> PR -> merge with quality gates enforced.
 2. `issue-handler` runs Solution Architect, posts options/estimation/impact, then waits for approval when required.
 3. After approval, developer agent implements changes in a branch, runs checks, and opens a PR.
 4. After PR merge to `main`, code is updated in this repository.
-5. Restart services from the same repo checkout to load updated Python process code:
+5. Restart services from the same repo checkout to load updated process code:
    - `./bin/down.sh && ./bin/up.sh`
    - or from Telegram: `/down` then `/up`
-6. `telegram-bot` and `issue-handler` containers run the updated repository code and continue serving commands/tasks.
+6. Runtime service stack is being migrated to Go entrypoints.
 
 ## Notes
 
 - Default DB mode is SQLite for fast local PoC startup.
 - Runtime state is stored under `var/` (`gitea`, `runner-1`, `runner-2`, issue handler state).
+- Go source/build/test scope is `cmd/` and `pkg/` only; avoid `go test ./...` because `var/` is runtime-only data.
 - Two Actions runners are configured: `gitea-runner-1` and `gitea-runner-2`.
 - PR process is workflow-enforced via `.gitea/PULL_REQUEST_TEMPLATE.md`, `CODEOWNERS`, and `bin/pr_policy.sh`.

@@ -14,7 +14,7 @@ jobs:
       - name: Install CI dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ripgrep python3-venv
+          apt-get install -y --no-install-recommends ripgrep
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
       - name: Install release dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git python3
+          apt-get install -y --no-install-recommends git
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
       - name: Resolve semantic version
         id: version
         run: |
-          version="$(python3 ./bin/semantic_version.py next)"
+          version="$(bash ./bin/semantic_version.sh next)"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Create and push version tag
