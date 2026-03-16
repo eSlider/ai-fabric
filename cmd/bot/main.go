@@ -58,7 +58,7 @@ func main() {
 		cmd, arg := splitCommand(text)
 		switch cmd {
 		case "/status":
-			_ = reply(bot, update.Message.Chat.ID, "AI Fabric bot is running.")
+			_ = reply(bot, update.Message.Chat.ID, "eSlider's fabric bot is running.")
 		case "/health":
 			_ = reply(bot, update.Message.Chat.ID, health(cfg))
 		case "/projects":
