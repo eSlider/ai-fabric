@@ -14,24 +14,15 @@ import (
 	"strings"
 	"time"
 
+	appconfig "produktor.io/ai-fabric/internal/config"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-type config struct {
-	Token            string
-	AllowedChatIDs   map[string]bool
-	AllowedUsers     map[string]bool
-	GiteaBaseURL     string
-	GiteaOwner       string
-	GiteaRepo        string
-	GiteaToken       string
-	MCPBaseURL       string
-	MCPAccessToken   string
-	ProjectListLimit int
-}
+type config = appconfig.BotConfig
 
 func main() {
-	cfg := loadConfig()
+	cfg := appconfig.LoadBotConfig()
 	if cfg.Token == "" {
 		fmt.Fprintln(os.Stderr, "TELEGRAM_BOT_TOKEN is required")
 		os.Exit(1)
@@ -104,37 +95,6 @@ func main() {
 			_ = reply(bot, update.Message.Chat.ID, "Unknown command.")
 		}
 	}
-}
-
-func loadConfig() config {
-	mcpURL := strings.TrimSpace(os.Getenv("GITEA_MCP_BASE_URL"))
-	if mcpURL == "" {
-		mcpURL = "http://localhost:8080/mcp"
-	}
-
-	return config{
-		Token:            strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		AllowedChatIDs:   parseSet(os.Getenv("TELEGRAM_ALLOWED_CHAT_IDS")),
-		AllowedUsers:     parseSet(strings.ToLower(os.Getenv("TELEGRAM_ALLOWED_USERNAMES"))),
-		GiteaBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("GITEA_BOT_BASE_URL")), "/"),
-		GiteaOwner:       strings.TrimSpace(os.Getenv("GITEA_BOT_OWNER")),
-		GiteaRepo:        strings.TrimSpace(os.Getenv("GITEA_BOT_REPO")),
-		GiteaToken:       strings.TrimSpace(os.Getenv("GITEA_BOT_TOKEN")),
-		MCPBaseURL:       strings.TrimRight(mcpURL, "/"),
-		MCPAccessToken:   strings.TrimSpace(os.Getenv("GITEA_ACCESS_TOKEN")),
-		ProjectListLimit: 20,
-	}
-}
-
-func parseSet(v string) map[string]bool {
-	out := map[string]bool{}
-	for _, part := range strings.Split(v, ",") {
-		p := strings.TrimSpace(part)
-		if p != "" {
-			out[p] = true
-		}
-	}
-	return out
 }
 
 func isAllowed(cfg config, msg *tgbotapi.Message) bool {

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"produktor.io/ai-fabric/pkg/system"
+	"produktor.io/ai-fabric/internal/config"
 )
 
 func TestLoadConfig_TransportSelectionAndCompatibility(t *testing.T) {
@@ -15,7 +15,7 @@ func TestLoadConfig_TransportSelectionAndCompatibility(t *testing.T) {
 	t.Setenv("GITEA_TRANSPORT_PRIMARY", "sdk")
 	t.Setenv("GITEA_CLI_FALLBACK_ENABLED", "true")
 
-	cfg := system.LoadConfig()
+	cfg := config.LoadConfig()
 
 	if cfg.Gitea.Token != "secret_token" {
 		t.Errorf("expected secret_token, got %s", cfg.Gitea.Token)

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"produktor.io/ai-fabric/internal/config"
 	"produktor.io/ai-fabric/pkg/gitea"
-	"produktor.io/ai-fabric/pkg/system"
 )
 
 const (
@@ -23,11 +23,11 @@ const (
 )
 
 type IssueHandler struct {
-	Cfg         *system.Config
+	Cfg         *config.Config
 	GiteaClient gitea.Client
 }
 
-func NewIssueHandler(cfg *system.Config) *IssueHandler {
+func NewIssueHandler(cfg *config.Config) *IssueHandler {
 	return &IssueHandler{
 		Cfg:         cfg,
 		GiteaClient: gitea.NewService(cfg.Gitea, cfg.RootDir, cfg.TeaConfigDir),

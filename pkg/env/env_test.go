@@ -1,4 +1,4 @@
-package system
+package env
 
 import (
 	"os"
@@ -78,23 +78,17 @@ func TestUnmarschalEnvionment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear the environment
 			os.Clearenv()
 
-			// Set up the environment variables
 			for key, value := range tt.envVars {
 				os.Setenv(key, value)
 			}
 
-			// Call the function
 			err := UnmarshalEnvironment(&tt.decoded)
-
-			// Assert error state
 			if (err != nil) != tt.expectedErr {
 				t.Errorf("expected error: %v, got error: %v", tt.expectedErr, err != nil)
 			}
 
-			// Clean up
 			os.Clearenv()
 		})
 	}
