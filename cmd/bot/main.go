@@ -25,6 +25,8 @@ type config struct {
 	GiteaOwner       string
 	GiteaRepo        string
 	GiteaToken       string
+	MCPBaseURL       string
+	MCPAccessToken   string
 	ProjectListLimit int
 }
 
@@ -55,6 +57,15 @@ func main() {
 		if text == "" {
 			continue
 		}
+		if !strings.HasPrefix(text, "/") {
+			msg, err := routeMCPMessage(cfg, text)
+			if err != nil {
+				msg = "MCP request failed: " + err.Error() + "\n\nUse: <tool-name> {\"arg\":\"value\"}\nExample: list_my_repos"
+			}
+			_ = reply(bot, update.Message.Chat.ID, trimLen(msg, 3900))
+			continue
+		}
+
 		cmd, arg := splitCommand(text)
 		switch cmd {
 		case "/status":
@@ -96,6 +107,11 @@ func main() {
 }
 
 func loadConfig() config {
+	mcpURL := strings.TrimSpace(os.Getenv("GITEA_MCP_BASE_URL"))
+	if mcpURL == "" {
+		mcpURL = "http://localhost:8080/mcp"
+	}
+
 	return config{
 		Token:            strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
 		AllowedChatIDs:   parseSet(os.Getenv("TELEGRAM_ALLOWED_CHAT_IDS")),
@@ -104,6 +120,8 @@ func loadConfig() config {
 		GiteaOwner:       strings.TrimSpace(os.Getenv("GITEA_BOT_OWNER")),
 		GiteaRepo:        strings.TrimSpace(os.Getenv("GITEA_BOT_REPO")),
 		GiteaToken:       strings.TrimSpace(os.Getenv("GITEA_BOT_TOKEN")),
+		MCPBaseURL:       strings.TrimRight(mcpURL, "/"),
+		MCPAccessToken:   strings.TrimSpace(os.Getenv("GITEA_ACCESS_TOKEN")),
 		ProjectListLimit: 20,
 	}
 }
@@ -202,39 +220,14 @@ func listProjects(cfg config) (string, error) {
 		return "", fmt.Errorf("gitea project variables are not fully configured")
 	}
 
-	u := fmt.Sprintf("%s/api/v1/orgs/%s/repos?limit=%d", cfg.GiteaBaseURL, url.PathEscape(cfg.GiteaOwner), cfg.ProjectListLimit)
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	repos, err := listProjectsFromEndpoint(cfg, "orgs")
 	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
-			u = strings.Replace(u, cfg.GiteaBaseURL, fallbackBaseURL, 1)
-			req, err = http.NewRequest(http.MethodGet, u, nil)
-			if err != nil {
-				return "", err
-			}
-			req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-			resp, err = http.DefaultClient.Do(req)
+		// If owner is not an org, Gitea returns 404 GetOrgByName; fallback to user repos.
+		if strings.Contains(strings.ToLower(err.Error()), "gitea error: 404") {
+			repos, err = listProjectsFromEndpoint(cfg, "users")
 		}
 	}
 	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("gitea error: %d %s", resp.StatusCode, string(body))
-	}
-
-	var repos []struct {
-		Name string `json:"name"`
-		URL  string `json:"html_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
 		return "", err
 	}
 	if len(repos) == 0 {
@@ -245,12 +238,56 @@ func listProjects(cfg config) (string, error) {
 	b.WriteString("Projects:\n")
 	for _, r := range repos {
 		b.WriteString("- " + r.Name)
-		if r.URL != "" {
-			b.WriteString(" (" + r.URL + ")")
+		repoURL := strings.TrimSpace(r.URL)
+		if repoURL == "" {
+			repoURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(cfg.GiteaBaseURL, "/"), url.PathEscape(cfg.GiteaOwner), url.PathEscape(r.Name))
 		}
+		b.WriteString(" - " + repoURL)
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String()), nil
+}
+
+func listProjectsFromEndpoint(cfg config, ownerType string) ([]struct {
+	Name string `json:"name"`
+	URL  string `json:"html_url"`
+}, error) {
+	u := fmt.Sprintf("%s/api/v1/%s/%s/repos?limit=%d", cfg.GiteaBaseURL, ownerType, url.PathEscape(cfg.GiteaOwner), cfg.ProjectListLimit)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "token "+cfg.GiteaToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
+			u = strings.Replace(u, cfg.GiteaBaseURL, fallbackBaseURL, 1)
+			req, err = http.NewRequest(http.MethodGet, u, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Authorization", "token "+cfg.GiteaToken)
+			resp, err = http.DefaultClient.Do(req)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gitea error: %d %s", resp.StatusCode, string(body))
+	}
+
+	var repos []struct {
+		Name string `json:"name"`
+		URL  string `json:"html_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
+		return nil, err
+	}
+	return repos, nil
 }
 
 func createTaskIssue(cfg config, description string, chatID int64) (string, error) {
@@ -333,4 +370,254 @@ func fallbackBaseURLForDNSError(baseURL string, err error) (string, bool) {
 		base.Host = "localhost"
 	}
 	return strings.TrimRight(base.String(), "/"), true
+}
+
+type mcpRPCRequest struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int64  `json:"id"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+}
+
+type mcpRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type mcpRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *mcpRPCError    `json:"error"`
+}
+
+func routeMCPMessage(cfg config, text string) (string, error) {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return "", fmt.Errorf("empty MCP request")
+	}
+	if strings.EqualFold(normalized, "mcp tools") || strings.EqualFold(normalized, "tools") {
+		return listMCPTools(cfg)
+	}
+
+	toolName, args, err := parseMCPToolRequest(normalized)
+	if err != nil {
+		return "", err
+	}
+	return callMCPTool(cfg, toolName, args)
+}
+
+func parseMCPToolRequest(text string) (string, map[string]any, error) {
+	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
+	toolName := strings.TrimSpace(parts[0])
+	if toolName == "" {
+		return "", nil, fmt.Errorf("tool name is required")
+	}
+	if !isValidMCPToolName(toolName) {
+		return "", nil, fmt.Errorf("MCP chat mode supports tool calls only.\n\n%s", mcpUsageMessage(""))
+	}
+
+	if len(parts) == 1 {
+		return toolName, map[string]any{}, nil
+	}
+
+	rawArgs := strings.TrimSpace(parts[1])
+	if rawArgs == "" {
+		return toolName, map[string]any{}, nil
+	}
+	if !strings.HasPrefix(rawArgs, "{") {
+		return "", nil, fmt.Errorf("arguments must be a JSON object")
+	}
+
+	args := map[string]any{}
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return "", nil, fmt.Errorf("invalid JSON args: %w", err)
+	}
+	return toolName, args, nil
+}
+
+func listMCPTools(cfg config) (string, error) {
+	_, httpResp, err := mcpRPC(cfg, 1, "initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]string{
+			"name":    "ai-fabric-tg-bot",
+			"version": "0.1.0",
+		},
+	}, "")
+	if err != nil {
+		return "", err
+	}
+
+	sessionID := httpResp.Header.Get("Mcp-Session-Id")
+	toolsResp, _, err := mcpRPC(cfg, 2, "tools/list", map[string]any{}, sessionID)
+	if err != nil {
+		return "", err
+	}
+
+	var parsed struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(toolsResp.Result, &parsed); err != nil {
+		return "", fmt.Errorf("failed to decode tools list: %w", err)
+	}
+	if len(parsed.Tools) == 0 {
+		return "MCP tools list is empty.", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("MCP tools:\n")
+	for i, tool := range parsed.Tools {
+		if i >= 40 {
+			b.WriteString("- ...\n")
+			break
+		}
+		b.WriteString("- " + tool.Name)
+		if tool.Description != "" {
+			b.WriteString(": " + tool.Description)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String()), nil
+}
+
+func callMCPTool(cfg config, toolName string, args map[string]any) (string, error) {
+	_, httpResp, err := mcpRPC(cfg, 1, "initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]string{
+			"name":    "ai-fabric-tg-bot",
+			"version": "0.1.0",
+		},
+	}, "")
+	if err != nil {
+		return "", err
+	}
+
+	sessionID := httpResp.Header.Get("Mcp-Session-Id")
+	toolResp, _, err := mcpRPC(cfg, 2, "tools/call", map[string]any{
+		"name":      toolName,
+		"arguments": args,
+	}, sessionID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "tool not found") {
+			return mcpUsageMessage(toolName), nil
+		}
+		return "", err
+	}
+
+	var parsed struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool           `json:"isError"`
+		Extra   map[string]any `json:"-"`
+	}
+	if err := json.Unmarshal(toolResp.Result, &parsed); err != nil {
+		return "", fmt.Errorf("failed to decode tool response: %w", err)
+	}
+
+	var out strings.Builder
+	for _, c := range parsed.Content {
+		if strings.TrimSpace(c.Text) == "" {
+			continue
+		}
+		if out.Len() > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(c.Text)
+	}
+	if out.Len() > 0 {
+		return out.String(), nil
+	}
+
+	raw, err := json.MarshalIndent(toolResp.Result, "", "  ")
+	if err != nil {
+		return "MCP tool call completed.", nil
+	}
+	return string(raw), nil
+}
+
+func mcpRPC(cfg config, id int64, method string, params any, sessionID string) (mcpRPCResponse, *http.Response, error) {
+	if cfg.MCPBaseURL == "" {
+		return mcpRPCResponse{}, nil, fmt.Errorf("GITEA_MCP_BASE_URL is not configured")
+	}
+
+	payload := mcpRPCRequest{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  method,
+		Params:  params,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return mcpRPCResponse{}, nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, cfg.MCPBaseURL, bytes.NewReader(data))
+	if err != nil {
+		return mcpRPCResponse{}, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	if cfg.MCPAccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.MCPAccessToken)
+	}
+
+	client := &http.Client{Timeout: 45 * time.Second}
+	httpResp, err := client.Do(req)
+	if err != nil {
+		return mcpRPCResponse{}, nil, err
+	}
+	defer httpResp.Body.Close()
+
+	body, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return mcpRPCResponse{}, httpResp, err
+	}
+	if httpResp.StatusCode >= 400 {
+		return mcpRPCResponse{}, httpResp, fmt.Errorf("mcp http error %d: %s", httpResp.StatusCode, string(body))
+	}
+
+	var parsed mcpRPCResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return mcpRPCResponse{}, httpResp, fmt.Errorf("failed to decode mcp response: %w", err)
+	}
+	if parsed.Error != nil {
+		return mcpRPCResponse{}, httpResp, fmt.Errorf("mcp rpc error %d: %s", parsed.Error.Code, parsed.Error.Message)
+	}
+	return parsed, httpResp, nil
+}
+
+func isValidMCPToolName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		isLower := r >= 'a' && r <= 'z'
+		isDigit := r >= '0' && r <= '9'
+		if !isLower && !isDigit && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func mcpUsageMessage(toolName string) string {
+	var b strings.Builder
+	b.WriteString("I can call MCP tools, but I cannot do free-text chat.\n")
+	if strings.TrimSpace(toolName) != "" {
+		b.WriteString("\nUnknown tool: ")
+		b.WriteString(toolName)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nUse:\n- tools\n- <tool-name>\n- <tool-name> {\"arg\":\"value\"}\n\nExample:\nsearch_repos {\"q\":\"ai-fabric\"}")
+	return b.String()
 }
