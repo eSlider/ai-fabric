@@ -13,13 +13,27 @@ It turns issue flow into controlled automation: plan -> implement -> validate ->
 ## How It Works
 
 ```mermaid
-flowchart LR
-  task[TaskOrIssue] --> analyze[ArchitectAnalysis]
-  analyze --> approve[HumanApproval]
-  approve --> implement[AgentImplementation]
-  implement --> verify[QualityGates]
-  verify --> pr[PullRequest]
-  pr --> merge[MergeAndRedeploy]
+flowchart TD
+  TaskOrIssue["Task or Issue"] --> Classify["Classify Case"]
+  Classify -->|"Feature/Bug"| ArchitectAnalysis["Architect Analysis"]
+  ArchitectAnalysis --> HumanApproval{"Approved?"}
+
+  HumanApproval -->|No| ReworkPlan["Rework Plan / Clarify Scope"]
+  ReworkPlan --> ArchitectAnalysis
+
+  HumanApproval -->|Yes| AgentImplementation["Agent Implementation"]
+  AgentImplementation --> QualityGates{"Checks Passed?"}
+
+  QualityGates -->|No| FixCycle["Fix + Retry"]
+  FixCycle --> AgentImplementation
+
+  QualityGates -->|Yes| PullRequest["Pull Request"]
+  PullRequest --> Review{"Review Result"}
+
+  Review -->|Changes Requested| FixCycle
+  Review -->|Approved| MergeAndRedeploy["Merge and Redeploy"]
+  MergeAndRedeploy --> Monitor["Monitor Runtime / Feedback"]
+  Monitor --> TaskOrIssue
 ```
 
 - Source of truth is Gitea (issues, branches, PRs, workflows).
