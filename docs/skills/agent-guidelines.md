@@ -21,6 +21,7 @@
 - Prefer minimal, reversible changes over broad rewrites.
 - Keep behavior explicit and testable; avoid hidden side effects.
 - Prefer CLI/Bash integration patterns already used in this repo.
+- For Gitea operations in agent/shell flows, prefer `tea` CLI first; use SDK-backed paths only when CLI is not viable.
 - Keep comments and docs concise, in English, and aligned with current behavior.
 
 ## Testing And CI Expectations
