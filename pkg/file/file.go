@@ -7,6 +7,7 @@ package file
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,7 +126,7 @@ func ReadDir(dir, ext string) (map[string][]byte, error) {
 		if file.IsDir() {
 			subFiles, err := ReadDir(filepath.Join(dir, file.Name()), ext)
 			if err != nil {
-				fmt.Sprintf("failed to read sub directory: %v", err)
+				fmt.Printf("failed to read sub directory: %v\n", err)
 				continue
 			}
 			for k, v := range subFiles {
@@ -159,4 +160,14 @@ func GetFileName(path string) string {
 		return base[:len(base)-len(ext)]
 	}
 	return base
+}
+
+// GetTempDir creates and returns a unique temporary directory under var/temp.
+func GetTempDir() string {
+	uq := uuid.New().String()
+	path := GetRootPath() + "/var/temp/" + uq
+	if err := os.MkdirAll(path, 0755); err != nil {
+		panic(err)
+	}
+	return path
 }

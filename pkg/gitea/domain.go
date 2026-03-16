@@ -13,6 +13,10 @@ type CLIConfig struct {
 	URL    string
 	Token  string
 	Docker CLIDockerConfig
+	Enabled *bool
+	Fallback struct {
+		Enabled *bool
+	}
 }
 
 type BotConfig struct {
@@ -28,6 +32,31 @@ type Config struct {
 	PrimaryTransport   string
 	CLIFallbackEnabled bool
 	CLI                CLIConfig
+	Bot                struct {
+		Base struct {
+			URL string
+		}
+		Owner string
+		Repo  string
+		Token string
+	}
+	Mcp struct {
+		Base struct {
+			URL string
+		}
+	}
+	Access struct {
+		Token string
+	}
+	Transport struct {
+		Primary string
+		Cli     struct {
+			Fallback *bool
+		}
+	}
+	Primary struct {
+		Transport string
+	}
 }
 
 func (c *Config) Normalize() {

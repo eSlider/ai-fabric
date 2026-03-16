@@ -118,8 +118,8 @@ func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
 
 func TestIsAllowed(t *testing.T) {
 	cfg := config{
-		AllowedChatIDs: parseSet("100"),
-		AllowedUsers:   parseSet("alice"),
+		AllowedChatIDs: map[string]bool{"100": true},
+		AllowedUsers:   map[string]bool{"alice": true},
 	}
 	msg := &tgbotapi.Message{
 		Chat: &tgbotapi.Chat{ID: 100},

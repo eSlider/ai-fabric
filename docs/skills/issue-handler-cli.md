@@ -5,7 +5,7 @@ The `issue-handler` is a Go service that polls Gitea issues, tracks processing s
 ## Project Structure
 
 - `cmd/issue-handler/main.go`: Minimal entry point, handles CLI flags and starts the loop.
-- `pkg/system/config.go`: Handles configuration loading using reflection-based environment variable mapping.
+- `internal/config/config.go`: Handles configuration loading using reflection-based environment variable mapping.
 - `pkg/fabric/issue_handler.go`: Contains the core logic for Gitea/Telegram interactions and issue processing.
 - `pkg/file/file.go`: Utility functions for file system operations, including root path detection.
 
