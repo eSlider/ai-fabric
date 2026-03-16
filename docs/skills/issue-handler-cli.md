@@ -15,7 +15,7 @@ The `issue-handler` is a Go-based autonomous service that polls Gitea issues and
 
 - Go 1.22+
 - Gitea instance
-- `tea` CLI (optional, if `GITEA_CLI_ENABLED=1`)
+- `tea` CLI (preferred default transport for Gitea operations)
 - Docker (optional, if `tea` is run via container)
 
 ### Environment Variables
@@ -26,7 +26,7 @@ The `issue-handler` is a Go-based autonomous service that polls Gitea issues and
 | `GITEA_BOT_TOKEN` | (required) | Gitea API token |
 | `GITEA_BOT_OWNER` | `eslider` | Repository owner |
 | `GITEA_BOT_REPO` | `ai-fabric` | Repository name |
-| `GITEA_CLI_ENABLED` | `1` | Use `tea` CLI for API requests |
+| `GITEA_CLI_ENABLED` | `1` | Use `tea` CLI for API requests (recommended default) |
 | `ISSUE_BASE_BRANCH` | `main` | Base branch for worktrees |
 | `ISSUE_POLL_INTERVAL_SEC` | `45` | Polling interval |
 | `ISSUE_HANDLER_DRY_RUN` | `0` | If `1`, do not perform actual changes |

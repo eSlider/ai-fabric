@@ -136,8 +136,8 @@ func LoadConfig() *Config {
 				Owner:   "eslider",
 				Repo:    "ai-fabric",
 			},
-			UseCLI:             false,
-			PrimaryTransport:   "sdk",
+			UseCLI:             true,
+			PrimaryTransport:   "cli",
 			CLIFallbackEnabled: true,
 			CLI: giteadomain.CLIConfig{
 				Image: "gitea/tea:latest",

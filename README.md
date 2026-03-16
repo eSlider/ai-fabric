@@ -50,6 +50,9 @@ sequenceDiagram
 - Source of truth is Gitea (issues, branches, PRs, workflows).
 - Delivery automation operates through repository workflows and policy scripts.
 - Runtime stack is being migrated to Go-first services and tooling.
+- Runtime configuration is centralized in `.env` (see `.env.example` for required keys).
+- Actions runner topology uses one replicated `gitea-runner` service (2 replicas).
+- Gitea MCP service is available in the stack as `gitea-mcp` (HTTP mode on port `8080`).
 
 ## Core Use Cases
 
