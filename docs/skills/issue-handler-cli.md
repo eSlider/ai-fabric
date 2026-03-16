@@ -1,6 +1,6 @@
 # Skill: Issue Handler CLI (Go)
 
-The `issue-handler` is a Go-based autonomous service that polls Gitea issues and executes an agent-based workflow to resolve them.
+The `issue-handler` is a Go service that polls Gitea issues, tracks processing state, and posts workflow comments.
 
 ## Project Structure
 
@@ -38,7 +38,7 @@ The `issue-handler` is a Go-based autonomous service that polls Gitea issues and
 
 ## Testing Strategy (TDD)
 
-The project follows a TDD approach for core logic. Tests are located in `cmd/issue-handler/main_test.go`.
+The project follows a TDD approach for core logic. Primary tests currently cover configuration and entrypoint behavior in `cmd/issue-handler/main_test.go`.
 
 ### Running Tests
 
@@ -48,19 +48,21 @@ go test -v ./cmd/issue-handler/...
 
 ### Key Test Areas
 
-1.  **Full Configuration Loading**: Ensures the `Config` struct is correctly initialized from environment variables using `mapstructure` and a generic underscore-based recursive map builder.
-2.  **Issue Classification**: Ensures issues are correctly categorized as `bug` or `feature` based on keywords in title and body.
-3.  **Skill Selection**: Validates that the correct documentation and skill files are associated with an issue based on its content.
+1. **Configuration Loading**: Ensures transport and compatibility env behavior is loaded correctly.
+2. **Transport Selection**: Confirms primary/fallback transport configuration mapping works as expected.
 
 ## Workflow
 
-1.  **Polling**: The handler lists open issues from Gitea.
-2.  **Classification**: Each issue is classified to determine the workflow (bug vs feature).
-3.  **Skill Selection**: Relevant skills are selected to guide the agent.
-4.  **Worktree Management**: A Git worktree is prepared for the issue branch.
-5.  **Agent Execution**: An autonomous agent is invoked with a generated prompt.
-6.  **Verification**: Automated tests and linting are run.
-7.  **Submission**: A PR is created with the proposed changes.
+1. **Polling**: The handler lists open issues from Gitea (or handles a single issue with `--issue-number`).
+2. **State Gate**: It checks local state and skips terminal statuses.
+3. **Retry Gate**: It waits retry interval before reprocessing failed issues.
+4. **Telegram Notify**: It sends start notification when the issue contains Telegram chat marker.
+5. **Issue Comments**: It comments claim/progress updates in Gitea.
+6. **State Persist**: It updates attempts/status and writes `var/issue-handler/state.json`.
+
+## Migration Note
+
+Full parity for architect/developer worktree automation and PR lifecycle is tracked in `docs/workflows/python-to-go-migration.md`.
 
 ## Laconic Code Style
 

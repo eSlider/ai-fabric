@@ -14,62 +14,160 @@ if [[ -z "${GITHUB_EVENT_PATH:-}" || ! -f "${GITHUB_EVENT_PATH}" ]]; then
   exit 1
 fi
 
-python3 - <<'PY'
-import json
-import os
-import re
-import sys
-import urllib.request
+if ! command -v go >/dev/null 2>&1; then
+  echo "::error::go command is required for PR policy checks"
+  exit 1
+fi
 
-event_path = os.environ["GITHUB_EVENT_PATH"]
-with open(event_path, "r", encoding="utf-8") as f:
-    payload = json.load(f)
+go_file="$(mktemp "${TMPDIR:-/tmp}/pr-policy-XXXXXX.go")"
+trap 'rm -f "${go_file}"' EXIT
 
-pr = payload.get("pull_request") or {}
-body = pr.get("body") or ""
+cat >"${go_file}" <<'GO'
+package main
 
-def fetch_pr_body_from_api(payload_obj):
-    pr_obj = payload_obj.get("pull_request") or {}
-    number = pr_obj.get("number") or payload_obj.get("number")
-    repo = payload_obj.get("repository") or {}
-    full_name = repo.get("full_name") or os.environ.get("GITHUB_REPOSITORY", "")
-    token = os.environ.get("GITHUB_TOKEN", "")
-    server = os.environ.get("GITHUB_SERVER_URL", "")
-    if not number or not full_name or not token or not server:
-        return ""
-    url = f"{server}/api/v1/repos/{full_name}/pulls/{number}"
-    req = urllib.request.Request(url, headers={"Authorization": f"token {token}"})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return (data.get("body") or "").strip()
-    except Exception:
-        return ""
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
 
-if not body.strip():
-    body = fetch_pr_body_from_api(payload)
+func asMap(value any) map[string]any {
+	m, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return m
+}
 
-required_sections = [
-    "## Problem",
-    "## Solution",
-    "## Risks",
-    "## Test Plan",
-    "## Rollback",
-    "## Issue Link",
-    "## AI Notes",
-]
+func asString(value any) string {
+	s, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
 
-missing = [section for section in required_sections if section not in body]
-if missing:
-    for section in missing:
-        print(f"::error::PR template section missing: {section}")
-    sys.exit(1)
+func asInt(value any) int {
+	switch v := value.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case json.Number:
+		n, _ := strconv.Atoi(v.String())
+		return n
+	default:
+		return 0
+	}
+}
 
-issue_ref = re.search(r"(?im)\\b(closes|fixes|refs)\\s+#\\d+\\b", body)
-if not issue_ref:
-    fallback_ref = re.search(r"(?m)#\\d+\\b", body)
-    if not fallback_ref:
-        print("::warning::Issue Link reference not detected in PR body")
+func fetchPRBody(payload map[string]any) string {
+	prObj := asMap(payload["pull_request"])
+	number := asInt(prObj["number"])
+	if number == 0 {
+		number = asInt(payload["number"])
+	}
 
-print("pr policy check passed.")
-PY
+	repo := asMap(payload["repository"])
+	fullName := asString(repo["full_name"])
+	if fullName == "" {
+		fullName = os.Getenv("GITHUB_REPOSITORY")
+	}
+
+	token := os.Getenv("GITHUB_TOKEN")
+	server := strings.TrimRight(os.Getenv("GITHUB_SERVER_URL"), "/")
+	if number == 0 || fullName == "" || token == "" || server == "" {
+		return ""
+	}
+
+	url := fmt.Sprintf("%s/api/v1/repos/%s/pulls/%d", server, fullName, number)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "token "+token)
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	var prResp map[string]any
+	if err := json.Unmarshal(data, &prResp); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(asString(prResp["body"]))
+}
+
+func main() {
+	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	raw, err := os.ReadFile(eventPath)
+	if err != nil {
+		fmt.Printf("::error::failed reading event payload: %v\n", err)
+		os.Exit(1)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		fmt.Printf("::error::failed parsing event payload JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	pr := asMap(payload["pull_request"])
+	body := strings.TrimSpace(asString(pr["body"]))
+	if body == "" {
+		body = fetchPRBody(payload)
+	}
+
+	requiredSections := []string{
+		"## Problem",
+		"## Solution",
+		"## Risks",
+		"## Test Plan",
+		"## Rollback",
+		"## Issue Link",
+		"## AI Notes",
+	}
+
+	hasErrors := false
+	for _, section := range requiredSections {
+		if !strings.Contains(body, section) {
+			fmt.Printf("::error::PR template section missing: %s\n", section)
+			hasErrors = true
+		}
+	}
+	if hasErrors {
+		os.Exit(1)
+	}
+
+	issueRefRe := regexp.MustCompile(`(?im)\b(closes|fixes|refs)\s+#\d+\b`)
+	fallbackRefRe := regexp.MustCompile(`(?m)#\d+\b`)
+	if !issueRefRe.MatchString(body) && !fallbackRefRe.MatchString(body) {
+		fmt.Println("::warning::Issue Link reference not detected in PR body")
+	}
+
+	fmt.Println("pr policy check passed.")
+}
+GO
+
+go run "${go_file}"

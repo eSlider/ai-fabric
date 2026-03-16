@@ -26,6 +26,8 @@ const (
 type Client interface {
 	ListOpenIssues(ctx context.Context, owner, repo string) ([]map[string]interface{}, error)
 	GetIssue(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error)
+	CreateIssueComment(ctx context.Context, owner, repo string, number int, body string) error
+	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
 }
 
 type Service struct {
@@ -80,6 +82,20 @@ func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) 
 		}
 		return s.getIssueCLI(ctx, owner, repo, number)
 	}
+}
+
+func (s *Service) CreateIssueComment(ctx context.Context, owner, repo string, number int, body string) error {
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	payload := map[string]interface{}{"body": body}
+	_, err := s.request(ctx, http.MethodPost, path, payload)
+	return err
+}
+
+func (s *Service) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	payload := map[string]interface{}{"state": state}
+	_, err := s.request(ctx, http.MethodPatch, path, payload)
+	return err
 }
 
 func (s *Service) listOpenIssuesSDK(ctx context.Context, owner, repo string) ([]map[string]interface{}, error) {
@@ -186,6 +202,24 @@ func (s *Service) ensureSDKClient() (*helpers.Client, error) {
 	return s.helperClient, nil
 }
 
+func (s *Service) request(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
+	primary := strings.ToLower(strings.TrimSpace(s.cfg.PrimaryTransport))
+	switch primary {
+	case "cli":
+		out, err := s.cliRequest(ctx, method, path, data)
+		if err == nil || !s.cfg.CLIFallbackEnabled {
+			return out, err
+		}
+		return s.httpRequest(ctx, method, path, data)
+	default:
+		out, err := s.httpRequest(ctx, method, path, data)
+		if err == nil || !s.cfg.CLIFallbackEnabled {
+			return out, err
+		}
+		return s.cliRequest(ctx, method, path, data)
+	}
+}
+
 func (s *Service) cliRequest(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
 	if err := s.ensureTeaLogin(ctx); err != nil {
 		return nil, err
@@ -216,6 +250,51 @@ func (s *Service) cliRequest(ctx context.Context, method, path string, data inte
 		return nil, fmt.Errorf("gitea cli returned non-json output for %s: %s", path, out)
 	}
 	return result, nil
+}
+
+func (s *Service) httpRequest(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
+	if strings.TrimSpace(s.cfg.Token) == "" {
+		return nil, fmt.Errorf("gitea token is required")
+	}
+	fullURL := strings.TrimRight(s.cfg.BaseURL, "/") + path
+
+	var bodyReader io.Reader
+	if data != nil {
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewBuffer(jsonData)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "token "+s.cfg.Token)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: defaultHTTPTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gitea http request failed %d on %s: %s", resp.StatusCode, path, string(body))
+	}
+
+	var out interface{}
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string]interface{}{}
+	}
+	return out, nil
 }
 
 func (s *Service) ensureTeaLogin(ctx context.Context) error {
