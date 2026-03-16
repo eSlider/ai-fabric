@@ -10,30 +10,11 @@ for script in "${scripts[@]}"; do
   bash -n "${script}"
 done
 
-python3 -m py_compile bin/*.py
-
-if command -v ruff >/dev/null 2>&1; then
-  ruff check bin/*.py
-elif [[ "${CI:-}" == "true" ]]; then
-  if command -v uv >/dev/null 2>&1; then
-    uv venv .venv-ruff
-    # shellcheck disable=SC1091
-    source .venv-ruff/bin/activate
-    uv pip install --quiet ruff
-    ruff check bin/*.py
-    deactivate
-    rm -rf .venv-ruff
-  else
-    python3 -m venv .venv-ruff
-    # shellcheck disable=SC1091
-    source .venv-ruff/bin/activate
-    pip install --quiet ruff
-    ruff check bin/*.py
-    deactivate
-    rm -rf .venv-ruff
-  fi
-else
-  echo "warning: ruff is not installed locally; skipping ruff check"
+if [[ -f "${ROOT_DIR}/go.mod" ]] && command -v go >/dev/null 2>&1; then
+  (
+    cd "${ROOT_DIR}"
+    go test ./cmd/... ./pkg/... >/dev/null
+  )
 fi
 
 echo "lint check passed."

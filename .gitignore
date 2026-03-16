@@ -8,10 +8,6 @@ var/
 .vscode/
 .cursor/
 
-# Python cache (for doc utility)
-__pycache__/
-*.pyc
-
 # Generated agent prompts (ephemeral runtime artifacts)
 .issue-agent-prompt.md
 .issue-architect-prompt.md

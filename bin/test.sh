@@ -15,14 +15,19 @@ required=(
   "${ROOT_DIR}/.gitea/PULL_REQUEST_TEMPLATE.md"
   "${ROOT_DIR}/CODEOWNERS"
   "${ROOT_DIR}/bin/pr_policy.sh"
-  "${ROOT_DIR}/bin/issue_handler.py"
-  "${ROOT_DIR}/bin/issue_handler.sh"
 )
 
 for path in "${required[@]}"; do
   [[ -f "${path}" ]] || { echo "Missing required file: ${path}"; exit 1; }
 done
 
-python3 -m unittest discover -s "${ROOT_DIR}/bin" -p "test_*.py"
+# Keep Go package discovery scoped to source directories.
+# `var/` contains runtime service data and must stay out of module/package scans.
+if [[ -f "${ROOT_DIR}/go.mod" ]] && command -v go >/dev/null 2>&1; then
+  (
+    cd "${ROOT_DIR}"
+    go test ./cmd/... ./pkg/...
+  )
+fi
 
 echo "test check passed."

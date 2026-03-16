@@ -6,9 +6,8 @@ Automatically process each open issue by delegating implementation to an agent, 
 
 ## Runtime
 
-- Script: `bin/issue_handler.py`
-- Launcher: `bin/issue_handler.sh`
-- Service: `issue-handler` in `docker-compose.yml`
+- Python script/runtime was removed.
+- Target runtime: Go `cmd/issue-handler` service (in migration).
 - Telegram `/task` creation path can trigger immediate one-shot processing for the created issue.
 - Role skill docs:
   - `docs/skills/solution-architect.md`
@@ -52,15 +51,20 @@ Environment variables:
 - `ISSUE_HANDLER_TRIGGER_ON_CREATE` (`1` by default, used by Telegram bot for immediate trigger)
 - `ISSUE_APPROVALS_FILE` (`var/issue-handler/approvals.json`, shared approval state)
 - `ISSUE_TRIGGER_EVENT`, `ISSUE_TRIGGER_REPO`, `ISSUE_TRIGGER_BASE_BRANCH` (optional trigger metadata hints validated at handler startup)
-- `ISSUE_HANDLER_TRIGGER_SCRIPT` (optional trigger script hint, defaults to `bin/issue_handler.sh`)
-- `CURSOR_SETTINGS_DIR` and `CURSOR_CONFIG_DIR` (mounted into handler container for Cursor agent settings)
+- `ISSUE_HANDLER_TRIGGER_SCRIPT` (deprecated, legacy Python path removed)
+- `GITEA_CLI_ENABLED` (`1` by default, prefer CLI transport for Gitea operations)
+- `GITEA_CLI_BIN` (optional local CLI binary path/name; when empty, dockerized `tea` is used)
+- `GITEA_CLI_IMAGE` (default `gitea/tea:latest`, used for dockerized CLI mode)
+- `GITEA_CLI_LOGIN` (default `ai-fabric`, login alias used by `tea`)
+- `GITEA_CLI_URL` (Gitea URL used by CLI login)
+- `GITEA_CLI_TOKEN` (token used by CLI login; defaults to `GITEA_BOT_TOKEN` when empty)
+- `GITEA_CLI_DOCKER_NETWORK` (default `host`, network mode for dockerized CLI)
+- `CURSOR_SETTINGS_DIR`, `CURSOR_CONFIG_DIR`, `CURSOR_LOCAL_BIN_DIR`, `CURSOR_AGENT_HOME_DIR` (mounted into handler container for `agent` binary and auth/session files)
+- `CURSOR_API_KEY` (optional non-interactive fallback when mounted agent auth/session is unavailable)
 
 ## Manual Trigger
 
-- Process one specific issue immediately:
-  - `./bin/issue_handler.sh --once --issue-number <id>`
-- Process existing open issues once:
-  - `./bin/issue_handler.sh --once`
+- Python trigger commands removed; Go trigger command to be documented when handler cutover is completed.
 
 ## State
 
