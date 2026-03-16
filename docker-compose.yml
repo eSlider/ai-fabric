@@ -57,6 +57,10 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      CONFIG_FILE: "${CONFIG_FILE:-/tmp/runner/config.yaml}"
+      GITEA_INSTANCE_URL: "${GITEA_INSTANCE_URL:-http://gitea:3000}"
+      GITEA_RUNNER_NAME: "${GITEA_RUNNER_NAME:-ai-fabric-runner}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./bin/gitea-runner-command.sh:/usr/local/bin/gitea-runner-command.sh:ro
