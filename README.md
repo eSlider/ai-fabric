@@ -13,27 +13,38 @@ It turns issue flow into controlled automation: plan -> implement -> validate ->
 ## How It Works
 
 ```mermaid
-flowchart TD
-  TaskOrIssue["Task or Issue"] --> Classify["Classify Case"]
-  Classify -->|"Feature/Bug"| ArchitectAnalysis["Architect Analysis"]
-  ArchitectAnalysis --> HumanApproval{"Approved?"}
+sequenceDiagram
+  participant U as User
+  participant G as Gitea
+  participant F as AI Fabric
+  participant A as Agent
+  participant C as CI
 
-  HumanApproval -->|No| ReworkPlan["Rework Plan / Clarify Scope"]
-  ReworkPlan --> ArchitectAnalysis
+  U->>G: Create issue
+  G->>F: Open issue event / poll
+  F->>F: Classify case
+  F->>U: Request approval
 
-  HumanApproval -->|Yes| AgentImplementation["Agent Implementation"]
-  AgentImplementation --> QualityGates{"Checks Passed?"}
-
-  QualityGates -->|No| FixCycle["Fix + Retry"]
-  FixCycle --> AgentImplementation
-
-  QualityGates -->|Yes| PullRequest["Pull Request"]
-  PullRequest --> Review{"Review Result"}
-
-  Review -->|Changes Requested| FixCycle
-  Review -->|Approved| MergeAndRedeploy["Merge and Redeploy"]
-  MergeAndRedeploy --> Monitor["Monitor Runtime / Feedback"]
-  Monitor --> TaskOrIssue
+  alt Approved
+    F->>A: Implement change
+    loop Until checks pass
+      A->>C: Run fmt/lint/test
+      C-->>A: Check result
+      alt Failed
+        F->>A: Fix and retry
+      end
+    end
+    A->>G: Open pull request
+    alt Changes requested
+      G->>A: Request updates
+      A->>C: Re-run checks
+    else Approved
+      G->>G: Merge PR
+      G-->>F: Feedback / new state
+    end
+  else Rejected
+    F->>F: Rework plan
+  end
 ```
 
 - Source of truth is Gitea (issues, branches, PRs, workflows).
