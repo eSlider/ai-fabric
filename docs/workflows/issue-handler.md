@@ -6,8 +6,8 @@ Automatically process each open issue by delegating implementation to an agent, 
 
 ## Runtime
 
-- Python script/runtime was removed.
-- Target runtime: Go `cmd/issue-handler` service (in migration).
+- Go runtime command: `cmd/issue-handler/main.go`
+- Compose service: `issue-handler`
 - Telegram `/task` creation path can trigger immediate one-shot processing for the created issue.
 - Role skill docs:
   - `docs/skills/solution-architect.md`
@@ -16,42 +16,33 @@ Automatically process each open issue by delegating implementation to an agent, 
 ## Flow
 
 1. Poll open issues from Gitea (`state=open`).
-2. Skip issues already marked with open PR state in local handler state.
-3. Classify issue type (`bug` or `feature`).
-4. Select relevant skills/docs context from issue text.
-5. Run **Solution Architect stage** with `agent`.
-6. Update issue body directly with:
-   - possible solutions
-   - recommended approach
-   - estimation
-7. If Telegram chat marker exists, request approval (`option number` / `confirm` / `cancel`).
-8. On approval: prepare isolated git worktree (`issue/<id>-<slug>`).
-9. Run developer agent (default `agent`) with generated prompt.
-   - Prompt artifacts are generated as `.issue-agent-prompt.md` and `.issue-architect-prompt.md` in the issue worktree and are ephemeral runtime files (not source docs).
-10. Run quality gates:
-   - `./bin/fmt.sh`
-   - `./bin/lint.sh`
-   - `./bin/test.sh`
-11. If checks fail, ask agent to fix and retry until `ISSUE_MAX_FIX_ATTEMPTS`.
-12. Commit, push branch, create PR, comment URL back to issue.
+2. If `--issue-number` is set, process only that issue when open and not a PR.
+3. Load persisted state from `var/issue-handler/state.json`.
+4. Skip terminal statuses: `completed`, `failed_max_attempts`, `pr_opened`, `cancelled`.
+5. Enforce retry cooldown for `failed` status using `ISSUE_RETRY_INTERVAL_SEC`.
+6. Parse Telegram marker in issue body and send a start notification when available.
+7. In normal mode:
+   - add claim/progress comments to the issue
+   - update local state (`attempts`, `last_attempt`, `status=completed`)
+8. In dry-run mode (`ISSUE_HANDLER_DRY_RUN=1`):
+   - do not mutate Gitea issue state
+   - only update local state with `status=dry_run`
+
+## Current vs Target
+
+- Current implementation is a Go-first processing loop with state handling and Gitea transport abstraction.
+- Full architect/developer worktree automation and PR lifecycle parity are tracked in:
+  - `docs/workflows/python-to-go-migration.md`
 
 ## Configuration
 
 Environment variables:
 
-- `ISSUE_BASE_BRANCH` (default `main`)
 - `ISSUE_POLL_INTERVAL_SEC` (default `45`)
 - `ISSUE_MAX_FIX_ATTEMPTS` (default `3`)
 - `ISSUE_RETRY_INTERVAL_SEC` (default `600`, retry delay for failed issues)
-- `ISSUE_AGENT_BIN` (default `agent`)
-- `ISSUE_AGENT_EXTRA_ARGS`
 - `ISSUE_HANDLER_DRY_RUN` (`1` for safe dry-run)
-- `ISSUE_ARCHITECT_ENABLED` (`1` by default)
-- `ISSUE_ARCHITECT_MAX_CHARS` (max architect text persisted into issue body)
-- `ISSUE_HANDLER_TRIGGER_ON_CREATE` (`1` by default, used by Telegram bot for immediate trigger)
-- `ISSUE_APPROVALS_FILE` (`var/issue-handler/approvals.json`, shared approval state)
-- `ISSUE_TRIGGER_EVENT`, `ISSUE_TRIGGER_REPO`, `ISSUE_TRIGGER_BASE_BRANCH` (optional trigger metadata hints validated at handler startup)
-- `ISSUE_HANDLER_TRIGGER_SCRIPT` (deprecated, legacy Python path removed)
+- `TELEGRAM_BOT_TOKEN` (optional; enables Telegram notifications from handler)
 - `GITEA_CLI_ENABLED` (`1` by default, prefer CLI transport for Gitea operations)
 - `GITEA_CLI_BIN` (optional local CLI binary path/name; when empty, dockerized `tea` is used)
 - `GITEA_CLI_IMAGE` (default `gitea/tea:latest`, used for dockerized CLI mode)
@@ -59,27 +50,19 @@ Environment variables:
 - `GITEA_CLI_URL` (Gitea URL used by CLI login)
 - `GITEA_CLI_TOKEN` (token used by CLI login; defaults to `GITEA_BOT_TOKEN` when empty)
 - `GITEA_CLI_DOCKER_NETWORK` (default `host`, network mode for dockerized CLI)
-- `CURSOR_SETTINGS_DIR`, `CURSOR_CONFIG_DIR`, `CURSOR_LOCAL_BIN_DIR`, `CURSOR_AGENT_HOME_DIR` (mounted into handler container for `agent` binary and auth/session files)
-- `CURSOR_API_KEY` (optional non-interactive fallback when mounted agent auth/session is unavailable)
+- `GITEA_TRANSPORT_PRIMARY` / `GITEA_PRIMARY_TRANSPORT` (`cli` or `sdk`)
+- `GITEA_CLI_FALLBACK_ENABLED` / `GITEA_TRANSPORT_CLI_FALLBACK` (enable secondary transport fallback)
 
 ## Manual Trigger
 
-- Python trigger commands removed; Go trigger command to be documented when handler cutover is completed.
+- Process one specific issue immediately:
+  - `issue-handler --once --issue-number <id>`
+- Process existing open issues once:
+  - `issue-handler --once`
 
 ## State
 
 - Persistent state file: `var/issue-handler/state.json`
-- Worktrees: `var/agents/issue-<number>/`
 - Idempotency rules:
-  - Solution Architect section is inserted once using body markers.
-  - Existing marker block prevents architect re-run.
-  - Tracked issues with `in_progress|pr_opened|failed` are not auto-retriggered, even if issue body is edited.
-
-## Approval Gate (Telegram)
-
-- If issue body contains marker `<!-- ai-fabric:telegram-chat-id:<chat_id> -->`, handler sends Solution Architect output to that chat.
-- User decision commands:
-  - option number (`1`, `2`, ...)
-  - `confirm` (use recommended approach)
-  - `cancel` (issue is closed)
-- Developer stage starts only after approval.
+  - Terminal statuses are not reprocessed.
+  - Failed issues respect retry interval.

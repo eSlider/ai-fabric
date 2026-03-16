@@ -49,10 +49,11 @@ sequenceDiagram
 
 - Source of truth is Gitea (issues, branches, PRs, workflows).
 - Delivery automation operates through repository workflows and policy scripts.
-- Runtime stack is being migrated to Go-first services and tooling.
+- Runtime stack runs on Go-first services and tooling.
 - Runtime configuration is centralized in `.env` (see `.env.example` for required keys).
 - Actions runner topology uses one replicated `gitea-runner` service (2 replicas).
 - Gitea MCP service is available in the stack as `gitea-mcp` (HTTP mode on port `8080`).
+- Runtime services in stack: `issue-handler` and `tg-bot` (both Dockerfile-based, compose watch enabled).
 
 ## Core Use Cases
 
@@ -67,6 +68,7 @@ sequenceDiagram
 - Architecture: [`docs/architecture/ai-fabric-poc.md`](docs/architecture/ai-fabric-poc.md)
 - CI/CD policy: [`docs/workflows/ci-cd.md`](docs/workflows/ci-cd.md)
 - Issue automation flow: [`docs/workflows/issue-handler.md`](docs/workflows/issue-handler.md)
+- Python to Go migration runbook: [`docs/workflows/python-to-go-migration.md`](docs/workflows/python-to-go-migration.md)
 - PR workflow rules: [`docs/workflows/pr-best-practices.md`](docs/workflows/pr-best-practices.md)
 - Agent operating rules: [`docs/skills/agent-guidelines.md`](docs/skills/agent-guidelines.md)
 

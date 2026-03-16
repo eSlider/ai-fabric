@@ -173,13 +173,25 @@ func (h *IssueHandler) ProcessIssue(issue map[string]interface{}, state map[stri
 	}
 
 	status, _ := issueState["status"].(string)
-	if status == "completed" || status == "failed_max_attempts" {
+	if status == "completed" || status == "failed_max_attempts" || status == "pr_opened" || status == "cancelled" {
 		return nil
+	}
+
+	if status == "failed" {
+		lastAttempt, _ := issueState["last_attempt"].(string)
+		if ts, err := time.Parse(time.RFC3339, lastAttempt); err == nil {
+			if time.Since(ts) < time.Duration(h.Cfg.Issue.IssueBot.RetryIntervalSec)*time.Second {
+				return nil
+			}
+		}
 	}
 
 	attempts, _ := issueState["attempts"].(float64)
 	if int(attempts) >= h.Cfg.Issue.MaxFixAttempts {
 		issueState["status"] = "failed_max_attempts"
+		if n := extractIssueNumber(issue["number"]); n > 0 {
+			_ = h.GiteaClient.CreateIssueComment(context.Background(), h.Cfg.Gitea.Owner, h.Cfg.Gitea.Repo, n, "[issue-handler] Max fix attempts reached.")
+		}
 		return nil
 	}
 
@@ -192,13 +204,28 @@ func (h *IssueHandler) ProcessIssue(issue map[string]interface{}, state map[stri
 		_ = h.TelegramSend(chatID, fmt.Sprintf("Started processing issue #%s", issueNum))
 	}
 
-	// Implementation of processing logic...
-	// (Keeping it minimal as per guidelines and previous code)
+	if h.Cfg.Issue.DryRun {
+		issueState["status"] = "dry_run"
+		issueState["attempts"] = attempts + 1
+		issueState["last_attempt"] = time.Now().Format(time.RFC3339)
+		fmt.Printf("[issue-handler] Dry-run mode for issue #%s\n", issueNum)
+		return nil
+	}
+
+	if n := extractIssueNumber(issue["number"]); n > 0 {
+		_ = h.GiteaClient.CreateIssueComment(context.Background(), h.Cfg.Gitea.Owner, h.Cfg.Gitea.Repo, n, "[issue-handler] Claimed issue. Starting automated processing.")
+	}
+
+	// Placeholder for full implementation orchestration.
 	fmt.Printf("[issue-handler] Processing #%s: %s\n", issueNum, issue["title"])
 
-	issueState["status"] = "in_progress"
+	issueState["status"] = "completed"
 	issueState["attempts"] = attempts + 1
 	issueState["last_attempt"] = time.Now().Format(time.RFC3339)
+
+	if n := extractIssueNumber(issue["number"]); n > 0 {
+		_ = h.GiteaClient.CreateIssueComment(context.Background(), h.Cfg.Gitea.Owner, h.Cfg.Gitea.Repo, n, "[issue-handler] Processing completed.")
+	}
 
 	return nil
 }

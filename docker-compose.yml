@@ -1,3 +1,36 @@
+x-go-service-base: &go-service-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      - BUILDKIT_INLINE_CACHE=1
+  user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+  restart: unless-stopped
+  network_mode: host
+  depends_on:
+    gitea:
+      condition: service_healthy
+  env_file:
+    - .env
+  develop:
+    watch:
+      - action: rebuild
+        path: ./cmd
+      - action: rebuild
+        path: ./pkg
+      - action: rebuild
+        path: ./go.mod
+      - action: rebuild
+        path: ./go.sum
+      - action: rebuild
+        path: ./Dockerfile
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+      labels: "service"
+
 services:
   gitea:
     image: docker.gitea.com/gitea:1.24.6
@@ -26,15 +59,14 @@ services:
       - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./bin/gitea-runner-command.sh:/usr/local/bin/gitea-runner-command.sh:ro
     deploy:
       mode: replicated
       replicas: 2
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "set -eu; mkdir -p /tmp/runner; if [ ! -f \"$$CONFIG_FILE\" ]; then act_runner generate-config | sed 's#network: \"\"#network: \"ai-fabric_default\"#' > \"$$CONFIG_FILE\"; fi; if [ -z \"$$GITEA_RUNNER_REGISTRATION_TOKEN\" ] || [ \"$$GITEA_RUNNER_REGISTRATION_TOKEN\" = \"replace-with-runner-token\" ]; then echo \"GITEA_RUNNER_REGISTRATION_TOKEN is not set. Waiting for a valid token in .env\"; exec sleep infinity; fi; if [ ! -f /tmp/runner/.runner ]; then act_runner register --no-interactive --instance \"$$GITEA_INSTANCE_URL\" --token \"$$GITEA_RUNNER_REGISTRATION_TOKEN\" --name \"$$GITEA_RUNNER_NAME-$$HOSTNAME\"; touch /tmp/runner/.runner; fi; exec act_runner daemon --config \"$$CONFIG_FILE\""
+    entrypoint: ["/bin/sh", "/usr/local/bin/gitea-runner-command.sh"]
 
   gitea-mcp:
-    image: docker.gitea.com/gitea-mcp-server:v1.0.1
+    image: docker.gitea.com/gitea-mcp-server:latest
     restart: unless-stopped
     depends_on:
       gitea:
@@ -43,8 +75,17 @@ services:
       - .env
     ports:
       - "8080:8080"
-    command: ["-t", "http", "--port", "8080"]
+    command: ["/app/gitea-mcp", "-t", "http", "-p", "8080"]
 
-  # Python-based issue-handler and telegram-bot services were removed.
-  # Go replacements will be added in dedicated follow-up change.
+  issue-handler:
+    <<: *go-service-base
+    command: ["issue-handler"]
+    labels:
+      - "service=issue-handler"
+
+  tg-bot:
+    <<: *go-service-base
+    command: ["tg-bot"]
+    labels:
+      - "service=tg-bot"
 
