@@ -19,6 +19,8 @@ x-go-service-base: &go-service-base
       - action: rebuild
         path: ./pkg
       - action: rebuild
+        path: ./internal
+      - action: rebuild
         path: ./go.mod
       - action: rebuild
         path: ./go.sum
@@ -44,7 +46,8 @@ services:
     volumes:
       - ./var/gitea:/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/healthz"]
+      test:
+        ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/healthz"]
       interval: 15s
       timeout: 5s
       retries: 20
@@ -92,4 +95,3 @@ services:
     command: ["tg-bot"]
     labels:
       - "service=tg-bot"
-
