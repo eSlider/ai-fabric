@@ -1,9 +1,9 @@
 package config
 
 import (
-	enve "produktor.io/ai-fabric/pkg/env"
 	"produktor.io/ai-fabric/pkg/file"
 
+	goenv "github.com/eslider/go-env"
 	"github.com/joho/godotenv"
 )
 
@@ -54,10 +54,9 @@ func LoadMerged() (err error) {
 
 // UnmarshalEnvironment read all environment variables and unmarshal them into the provided struct
 // Something like SERVICE_KEY=1234567890 would be unmarshal into the struct Service.Key = "1234567890"
-func UnmarshalEnvironment(s any) (err error) {
-	return enve.UnmarshalEnvironment(s)
-}
-
-func GetEnvVarsAsMap() map[string]any {
-	return enve.GetEnvVarsAsMap()
+//
+// Implementation delegated to github.com/eslider/go-env (extracted per
+// inventar/docs/asr/ASR-0008-ai-fabric-audit.md).
+func UnmarshalEnvironment(s any) error {
+	return goenv.Unmarshal(s)
 }
