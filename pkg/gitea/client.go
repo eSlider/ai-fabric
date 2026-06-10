@@ -28,6 +28,9 @@ type Client interface {
 	GetIssue(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error)
 	CreateIssueComment(ctx context.Context, owner, repo string, number int, body string) error
 	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
+	UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error
+	CreatePullRequest(ctx context.Context, owner, repo string, opts map[string]interface{}) (map[string]interface{}, error)
+	ListPullRequests(ctx context.Context, owner, repo string, state string) ([]map[string]interface{}, error)
 }
 
 type Service struct {
@@ -96,6 +99,47 @@ func (s *Service) UpdateIssueState(ctx context.Context, owner, repo string, numb
 	payload := map[string]interface{}{"state": state}
 	_, err := s.request(ctx, http.MethodPatch, path, payload)
 	return err
+}
+func (s *Service) UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error {
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	payload := map[string]interface{}{"body": body}
+	_, err := s.request(ctx, http.MethodPatch, path, payload)
+	return err
+}
+
+func (s *Service) CreatePullRequest(ctx context.Context, owner, repo string, opts map[string]interface{}) (map[string]interface{}, error) {
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/pulls", owner, repo)
+	res, err := s.request(ctx, http.MethodPost, path, opts)
+	if err != nil {
+		return nil, err
+	}
+	pr, ok := res.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected PR response type: %T", res)
+	}
+	return pr, nil
+}
+
+func (s *Service) ListPullRequests(ctx context.Context, owner, repo string, state string) ([]map[string]interface{}, error) {
+	if state == "" {
+		state = "open"
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/pulls?state=%s", owner, repo, state)
+	res, err := s.request(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	items, ok := res.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected PR list response type: %T", res)
+	}
+	out := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		if pr, ok := item.(map[string]interface{}); ok {
+			out = append(out, pr)
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) listOpenIssuesSDK(ctx context.Context, owner, repo string) ([]map[string]interface{}, error) {

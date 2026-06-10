@@ -7,6 +7,10 @@ x-go-service-base: &go-service-base
   user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
   restart: unless-stopped
   network_mode: host
+  volumes:
+    - .:/workspace
+    - /home/user/.local/bin/agent:/usr/local/bin/agent:ro
+    - /var/run/docker.sock:/var/run/docker.sock
   depends_on:
     gitea:
       condition: service_healthy

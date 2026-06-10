@@ -28,6 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize Telegram bot
 	bot, err := tgbotapi.NewBotAPI(cfg.Token)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to init telegram bot: %v\n", err)
@@ -59,6 +60,8 @@ func main() {
 
 		cmd, arg := splitCommand(text)
 		switch cmd {
+		case "/menu":
+			_ = replyMenu(bot, update.Message.Chat.ID)
 		case "/status":
 			_ = reply(bot, update.Message.Chat.ID, "eSlider's fabric bot is running.")
 		case "/health":
@@ -92,7 +95,7 @@ func main() {
 			}
 			_ = reply(bot, update.Message.Chat.ID, runComposeLogs(service))
 		default:
-			_ = reply(bot, update.Message.Chat.ID, "Unknown command.")
+			_ = reply(bot, update.Message.Chat.ID, "Unknown command. Use /menu to open command buttons.")
 		}
 	}
 }
@@ -122,6 +125,32 @@ func splitCommand(text string) (string, string) {
 
 func reply(bot *tgbotapi.BotAPI, chatID int64, text string) error {
 	msg := tgbotapi.NewMessage(chatID, trimLen(text, 4000))
+	_, err := bot.Send(msg)
+	return err
+}
+
+func replyMenu(bot *tgbotapi.BotAPI, chatID int64) error {
+	msg := tgbotapi.NewMessage(chatID, "Choose an action:")
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("/status"),
+			tgbotapi.NewKeyboardButton("/health"),
+			tgbotapi.NewKeyboardButton("/projects"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("/checks"),
+			tgbotapi.NewKeyboardButton("/up"),
+			tgbotapi.NewKeyboardButton("/down"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("/logs"),
+			tgbotapi.NewKeyboardButton("/task"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+	keyboard.OneTimeKeyboard = true
+	keyboard.InputFieldPlaceholder = "Tap a command or type it"
+	msg.ReplyMarkup = keyboard
 	_, err := bot.Send(msg)
 	return err
 }

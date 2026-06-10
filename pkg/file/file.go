@@ -7,10 +7,11 @@ package file
 
 import (
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 var rootPath string
@@ -23,7 +24,7 @@ func GetModRootPath() (string, error) {
 	// Get base directory by file info
 	var prevPath string
 	for {
-		if Exists(path+"/etc") || Exists(path+"/data") {
+		if Exists(path + "/go.mod") {
 			rootPath = path
 			return rootPath, nil
 		}
