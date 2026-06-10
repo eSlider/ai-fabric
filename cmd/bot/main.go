@@ -62,6 +62,8 @@ func main() {
 		switch cmd {
 		case "/menu":
 			_ = replyMenu(bot, update.Message.Chat.ID)
+		case "/help":
+			_ = reply(bot, update.Message.Chat.ID, helpText())
 		case "/status":
 			_ = reply(bot, update.Message.Chat.ID, "eSlider's fabric bot is running.")
 		case "/health":
@@ -145,6 +147,7 @@ func replyMenu(bot *tgbotapi.BotAPI, chatID int64) error {
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("/logs"),
 			tgbotapi.NewKeyboardButton("/task"),
+			tgbotapi.NewKeyboardButton("/help"),
 		),
 	)
 	keyboard.ResizeKeyboard = true
@@ -597,6 +600,22 @@ func isValidMCPToolName(name string) bool {
 		}
 	}
 	return true
+}
+
+func helpText() string {
+	return strings.TrimSpace(`Commands:
+/menu — show command buttons
+/status — bot running status
+/health — Gitea health check
+/projects — list Gitea projects
+/task <description> — create a task issue
+/checks — run fmt, lint, and test scripts
+/up — start docker compose stack
+/down — stop docker compose stack
+/logs <service> — show docker compose logs
+/help — show this message
+
+Non-command messages invoke MCP tools. Send "tools" to list available tools, or <tool-name> {"arg":"value"} to call one.`)
 }
 
 func mcpUsageMessage(toolName string) string {
