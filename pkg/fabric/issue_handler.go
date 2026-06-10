@@ -541,6 +541,10 @@ func (h *IssueHandler) ensureWorktree(branch, path, baseRef string) error {
 
 	if _, err := os.Stat(path); err == nil {
 		_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "worktree", "remove", "--force", path)
+		// The directory may exist without a registered worktree (e.g. after a
+		// prune); git can neither remove nor re-add it then.
+		_ = os.RemoveAll(path)
+		_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "worktree", "prune")
 	}
 
 	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "fetch", "origin")
