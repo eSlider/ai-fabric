@@ -50,9 +50,9 @@ func main() {
 			continue
 		}
 		if !strings.HasPrefix(text, "/") {
-			msg, err := routeMCPMessage(cfg, text)
+			msg, err := routeFreeTextMessage(cfg, text, update.Message.Chat.ID)
 			if err != nil {
-				msg = "MCP request failed: " + err.Error() + "\n\nUse: <tool-name> {\"arg\":\"value\"}\nExample: list_my_repos"
+				msg = formatRouteError(err)
 			}
 			_ = reply(bot, update.Message.Chat.ID, trimLen(msg, 3900))
 			continue
@@ -279,6 +279,78 @@ type mcpRPCResponse struct {
 	ID      int64           `json:"id"`
 	Result  json.RawMessage `json:"result"`
 	Error   *mcpRPCError    `json:"error"`
+}
+
+const minTaskRequestLen = 8
+
+var taskRequestKeywords = []string{
+	"сделай", "нужно", "исправь", "добавь", "реализуй", "создай", "почини",
+	"fix", "add", "implement", "create", "need", "please", "should", "make",
+}
+
+func looksLikeMCPToolRequest(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	if strings.EqualFold(normalized, "tools") || strings.EqualFold(normalized, "mcp tools") {
+		return true
+	}
+	parts := strings.SplitN(normalized, " ", 2)
+	toolName := strings.TrimSpace(parts[0])
+	if !isValidMCPToolName(toolName) {
+		return false
+	}
+	if len(parts) == 1 {
+		return true
+	}
+	return strings.HasPrefix(strings.TrimSpace(parts[1]), "{")
+}
+
+func looksLikeTaskRequest(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if len(normalized) < minTaskRequestLen {
+		return false
+	}
+	lower := strings.ToLower(normalized)
+	for _, kw := range taskRequestKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, "?")
+}
+
+func routeFreeTextMessage(cfg config, text string, chatID int64) (string, error) {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return freeTextHelpMessage(), nil
+	}
+	if looksLikeMCPToolRequest(normalized) {
+		return routeMCPMessage(cfg, normalized)
+	}
+	if looksLikeTaskRequest(normalized) {
+		return createTaskIssue(cfg, normalized, chatID)
+	}
+	return freeTextHelpMessage(), nil
+}
+
+func formatRouteError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "I can call MCP tools") || strings.Contains(msg, "MCP chat mode supports") {
+		return msg
+	}
+	return "Request failed: " + msg
+}
+
+func freeTextHelpMessage() string {
+	return strings.TrimSpace(`I did not recognize that message.
+
+Send a task in natural language (e.g. "нужно исправить баг") or use:
+- /task <description> — create a Gitea issue
+- /projects — list projects
+- tools — list MCP tools
+- <tool-name> {"arg":"value"} — call an MCP tool`)
 }
 
 func routeMCPMessage(cfg config, text string) (string, error) {
@@ -513,7 +585,8 @@ func helpText() string {
 /logs <service> — show docker compose logs
 /help — show this message
 
-Non-command messages invoke MCP tools. Send "tools" to list available tools, or <tool-name> {"arg":"value"} to call one.`)
+Natural-language task requests (e.g. "нужно исправить баг") also create Gitea issues.
+For MCP tools, send "tools" to list them, or <tool-name> {"arg":"value"} to call one.`)
 }
 
 func mcpUsageMessage(toolName string) string {
