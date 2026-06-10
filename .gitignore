@@ -1,5 +1,7 @@
 # Runtime and generated state
 var/
+# Go module/build cache (created when HOME=/workspace in compose services)
+go/
 .env
 .gitconfig
 dist/

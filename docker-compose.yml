@@ -25,6 +25,9 @@ x-go-service-base: &go-service-base
     - .env
   environment:
     - HOME=/workspace
+    # Keep module cache off the bind-mounted repo (HOME=/workspace => default GOPATH is /workspace/go).
+    - GOMODCACHE=/tmp/go/pkg/mod
+    - GOCACHE=/tmp/go/build
   develop:
     watch:
       - action: rebuild

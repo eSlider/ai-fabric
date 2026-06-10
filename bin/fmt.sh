@@ -10,6 +10,7 @@ trailing_ws_found=0
 if command -v rg >/dev/null 2>&1; then
   if rg -n "[ \t]+$" . \
     --glob "!var/**" \
+    --glob "!go/**" \
     --glob "!.git/**" \
     --glob "!.cache/**" \
     --glob "!.cursor/**"; then
@@ -22,6 +23,7 @@ else
     fi
   done < <(find . \
     -path './var' -prune -o \
+    -path './go' -prune -o \
     -path './.git' -prune -o \
     -path './.cache' -prune -o \
     -path './.cursor' -prune -o \
