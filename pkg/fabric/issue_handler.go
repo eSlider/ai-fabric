@@ -2,6 +2,7 @@ package fabric
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -238,23 +239,61 @@ func (h *IssueHandler) RunOnce(targetIssue int) {
 		}
 	}
 
-	h.syncConflictedPRs()
+	h.syncStalePullRequests()
 	h.cleanupWorktrees()
 }
 
-// syncConflictedPRs heals open PRs that became unmergeable after the base
-// branch moved; Gitea sends no webhook for that, so the poller covers it.
-func (h *IssueHandler) syncConflictedPRs() {
+// syncStalePullRequests merges the latest base into open PRs that need it:
+// conflicted PRs always; approved PRs that fell behind base as well.
+func (h *IssueHandler) syncStalePullRequests() {
 	owner, repo := h.Cfg.Gitea.Owner, h.Cfg.Gitea.Repo
 	prs, err := h.Developer.ListOpenPullRequests(owner, repo)
 	if err != nil {
 		return
 	}
 	for _, pr := range prs {
-		if !pr.Mergeable {
+		if h.shouldSyncPullRequest(owner, repo, pr) {
 			h.SyncPullRequest(owner, repo, pr.Index)
 		}
 	}
+}
+
+// shouldSyncPullRequest reports whether a PR needs a base-branch merge.
+func (h *IssueHandler) shouldSyncPullRequest(owner, repo string, pr *sdk.PullRequest) bool {
+	if pr.Head == nil {
+		return false
+	}
+	state := loadStatus(h.Developer, owner, repo, pr.Index)
+	if state.Escalated {
+		return false
+	}
+	if !pr.Mergeable {
+		return true
+	}
+	return h.pullRequestApproved(owner, repo, pr.Index) && h.prBehindBase(pr.Base.Ref, pr.Head.Sha)
+}
+
+// pullRequestApproved reports whether the automated reviewer APPROVEd the PR.
+func (h *IssueHandler) pullRequestApproved(owner, repo string, prNum int64) bool {
+	state := loadStatus(h.Developer, owner, repo, prNum)
+	if state.ApprovedForMerge {
+		return true
+	}
+	comments, err := h.Reviewer.ListIssueComments(owner, repo, prNum)
+	if err != nil {
+		return false
+	}
+	for i := len(comments) - 1; i >= 0; i-- {
+		c := comments[i]
+		if c.Poster == nil || !h.isBotLogin(c.Poster.UserName) {
+			continue
+		}
+		if !strings.Contains(c.Body, "## Automated review") {
+			continue
+		}
+		return strings.Contains(c.Body, "Verdict: APPROVE") && !strings.Contains(c.Body, "REQUEST_CHANGES")
+	}
+	return false
 }
 
 // worktreeMaxAge is how long an agent worktree may stay untouched before it is
@@ -891,6 +930,47 @@ func (h *IssueHandler) runAgent(path, promptPath string, role gitea.Client) (str
 
 func (h *IssueHandler) runChecks(path string) (string, error) {
 	return h.runCommand(path, nil, "/bin/bash", "-lc", "./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh")
+}
+
+// runPullRequestChecks runs the same gates as CI on a pull_request event.
+func (h *IssueHandler) runPullRequestChecks(path, owner, repo string, prNum int64) (string, error) {
+	pr, err := h.Developer.GetPullRequest(owner, repo, prNum)
+	if err != nil {
+		return "", err
+	}
+	eventPath := filepath.Join(path, ".pr-event.json")
+	event := map[string]any{
+		"number": pr.Index,
+		"pull_request": map[string]any{
+			"number": pr.Index,
+			"body":   pr.Body,
+		},
+		"repository": map[string]any{
+			"full_name": owner + "/" + repo,
+		},
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(eventPath, raw, 0644); err != nil {
+		return "", err
+	}
+
+	token := h.Cfg.Gitea.HandlerToken
+	if token == "" {
+		token = h.Cfg.Gitea.Token
+	}
+	baseURL := strings.TrimRight(h.Cfg.Gitea.BaseURL, "/")
+	env := []string{
+		"GITHUB_EVENT_NAME=pull_request",
+		"GITHUB_EVENT_PATH=" + eventPath,
+		"GITHUB_TOKEN=" + token,
+		"GITHUB_SERVER_URL=" + baseURL,
+		"GITHUB_REPOSITORY=" + owner + "/" + repo,
+	}
+	return h.runCommand(path, env, "/bin/bash", "-lc",
+		"./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh && ./bin/review_policy.sh && ./bin/pr_policy.sh")
 }
 
 func (h *IssueHandler) issueBranch(issueNumber int64, title string) string {

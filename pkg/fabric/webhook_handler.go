@@ -281,26 +281,116 @@ func (h *IssueHandler) handleCommitStatusWebhook(payload giteaWebhookPayload) {
 		go h.FixPullRequest(owner, repo, pr.Index, payload.SHA)
 		return
 	}
-	fmt.Printf("[webhook] No open PR found for failed sha %s, ignoring\n", payload.SHA)
+	fmt.Printf("[webhook] No open PR found for failed sha %s, checking base branch\n", payload.SHA)
+	go h.fileMainCIFailureIssue(owner, repo, payload.SHA, payload.Context)
 }
 
-// SyncPullRequest heals a PR that conflicts with its base branch: the base is
-// merged into the head, conflicts are resolved by the developer agent, checks
-// are verified and the result is pushed (which re-triggers CI and review).
+// ciFailureIssueTitle is the dedup key for one automated issue per failed base commit.
+func ciFailureIssueTitle(baseBranch, sha string) string {
+	short := sha
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return fmt.Sprintf("[ci] %s check failure at %s", baseBranch, short)
+}
+
+// commitOnBaseBranch reports whether sha is reachable from the configured base branch.
+func (h *IssueHandler) commitOnBaseBranch(sha string) bool {
+	if sha == "" || h.Cfg.RootDir == "" {
+		return false
+	}
+	base := h.Cfg.Issue.BaseBranch
+	if base == "" {
+		base = "main"
+	}
+	ref := "origin/" + base
+	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "fetch", "origin", base)
+	_, err := h.runCommand(h.Cfg.RootDir, nil, "git", "merge-base", "--is-ancestor", sha, ref)
+	return err == nil
+}
+
+// fileMainCIFailureIssue opens a tracked issue when CI fails on the base branch after
+// merge (no open PR owns the failing head SHA). The regular architect-developer flow
+// picks it up on the next poll cycle.
+func (h *IssueHandler) fileMainCIFailureIssue(owner, repo, sha, checkContext string) {
+	base := h.Cfg.Issue.BaseBranch
+	if base == "" {
+		base = "main"
+	}
+	if !h.commitOnBaseBranch(sha) {
+		fmt.Printf("[webhook] Failed sha %s is not on %s, ignoring\n", sha, base)
+		return
+	}
+
+	title := ciFailureIssueTitle(base, sha)
+	if issues, err := h.Developer.ListOpenIssues(owner, repo); err == nil {
+		for _, issue := range issues {
+			if issue.Title == title {
+				fmt.Printf("[webhook] CI failure issue already filed: #%d\n", issue.Index)
+				return
+			}
+		}
+	}
+
+	commitMsg, _ := h.runCommand(h.Cfg.RootDir, nil, "git", "log", "-1", "--format=%s", sha)
+	baseURL := strings.TrimRight(h.Cfg.Gitea.BaseURL, "/")
+	body := fmt.Sprintf(`CI failed on %s after a merge or direct push. No open PR matches this commit, so this issue was opened automatically.
+
+## Failure
+- Branch: %s
+- Commit: %s
+- Check: %s
+- Message: %s
+- Actions: %s/%s/%s/actions
+
+## Task
+Reproduce on %s, fix the failing checks
+(./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh), open a PR, and verify CI is green on %s.
+`, base, base, sha, checkContext, commitMsg, baseURL, owner, repo, base, base)
+
+	issue, err := h.Developer.CreateIssue(owner, repo, title, body)
+	if err != nil {
+		fmt.Printf("[webhook] Failed to file CI failure issue for %s: %v\n", sha, err)
+		return
+	}
+	fmt.Printf("[webhook] Filed CI failure issue #%d for %s on %s\n", issue.Index, sha, base)
+}
+
+// SyncPullRequest merges the base branch into a PR head and fixes check failures.
+// It runs for conflicted PRs and for approved PRs that fell behind base.
 func (h *IssueHandler) SyncPullRequest(owner, repo string, prNum int64) {
 	if !h.tryClaim(h.busyPRs, prNum) {
 		return
 	}
 	defer h.release(h.busyPRs, prNum)
+	h.doSyncPullRequest(owner, repo, prNum)
+}
 
+// prBehindBase reports whether ref has commits not present in headSHA.
+func (h *IssueHandler) prBehindBase(baseRef, headSHA string) bool {
+	if headSHA == "" || h.Cfg.RootDir == "" {
+		return false
+	}
+	base := strings.TrimPrefix(baseRef, "origin/")
+	remote := "origin/" + base
+	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "fetch", "origin", base)
+	_, err := h.runCommand(h.Cfg.RootDir, nil, "git", "merge-base", "--is-ancestor", remote, headSHA)
+	return err != nil
+}
+
+func (h *IssueHandler) doSyncPullRequest(owner, repo string, prNum int64) {
 	pr, err := h.Developer.GetPullRequest(owner, repo, prNum)
-	if err != nil || pr.State != "open" || pr.Head == nil || pr.Mergeable {
+	if err != nil || pr.State != "open" || pr.Head == nil {
 		return
 	}
-	if loadStatus(h.Developer, owner, repo, prNum).Escalated {
+	if !h.shouldSyncPullRequest(owner, repo, pr) {
 		return
 	}
-	fmt.Printf("[sync] PR #%d conflicts with %s. Merging base and resolving...\n", prNum, pr.Base.Ref)
+	reason := "conflicts with"
+	if pr.Mergeable {
+		reason = "approved and behind"
+	}
+	fmt.Printf("[sync] PR #%d %s %s. Merging base and resolving...\n", prNum, reason, pr.Base.Ref)
 
 	branch := pr.Head.Ref
 	localBranch := fmt.Sprintf("sync/pr-%d", prNum)
@@ -310,7 +400,8 @@ func (h *IssueHandler) SyncPullRequest(owner, repo string, prNum int64) {
 		return
 	}
 
-	if out, err := h.runCommand(path, h.gitIdentityEnv(), "git", "merge", "--no-edit", "origin/"+pr.Base.Ref); err != nil {
+	mergeOut, mergeErr := h.runCommand(path, h.gitIdentityEnv(), "git", "merge", "--no-edit", "origin/"+pr.Base.Ref)
+	if mergeErr != nil {
 		conflicts, _ := h.runCommand(path, nil, "git", "diff", "--name-only", "--diff-filter=U")
 		fmt.Printf("[sync] Merge conflicts on PR #%d:\n%s\n", prNum, conflicts)
 
@@ -335,7 +426,7 @@ from the base branch. Then stage the files and complete the merge commit
 ## Constraints (inviolable, see docs/skills/engineering-principles.md)
 - Resolve conflicts only; no unrelated changes
 - Never discard base branch changes to make conflicts disappear
-`, prNum, pr.Title, pr.Base.Ref, conflicts, out)
+`, prNum, pr.Title, pr.Base.Ref, conflicts, mergeOut)
 		if err := os.WriteFile(promptPath, []byte(prompt), 0644); err != nil {
 			return
 		}
@@ -349,6 +440,9 @@ from the base branch. Then stage the files and complete the merge commit
 			_, _ = h.runCommand(path, nil, "git", "merge", "--abort")
 			return
 		}
+	} else if strings.Contains(mergeOut, "Already up to date") {
+		fmt.Printf("[sync] PR #%d already up to date with %s\n", prNum, pr.Base.Ref)
+		return
 	}
 
 	if err := h.commitFix(path, localBranch, branch, "chore: merge base branch and resolve conflicts"); err != nil {
@@ -356,14 +450,23 @@ from the base branch. Then stage the files and complete the merge commit
 		return
 	}
 	fmt.Printf("[sync] Pushed base merge for PR #%d\n", prNum)
+
+	pr, err = h.Developer.GetPullRequest(owner, repo, prNum)
+	if err != nil || pr.Head == nil {
+		return
+	}
+	if checkOut, checkErr := h.runPullRequestChecks(path, owner, repo, prNum); checkErr != nil {
+		fmt.Printf("[sync] Checks failing after base merge on PR #%d, launching fix\n", prNum)
+		h.fixPullRequestCore(owner, repo, pr, path, localBranch, branch, pr.Head.Sha, checkOut)
+	}
 }
 
 // FixPullRequest lets the developer agent fix a CI failure on a PR, within a
 // bounded budget; when the budget is exhausted the architect reviews the design
 // once and the PR is handed over to a human.
 func (h *IssueHandler) FixPullRequest(owner, repo string, prNum int64, headSHA string) {
-	if !h.tryClaim(h.busyPRs, prNum) {
-		fmt.Printf("[fixer] PR #%d is already being processed, skipping\n", prNum)
+	if !h.claimWithRetry(h.busyPRs, prNum, 6, 20*time.Second) {
+		fmt.Printf("[fixer] PR #%d stayed busy, skipping fix\n", prNum)
 		return
 	}
 	defer h.release(h.busyPRs, prNum)
@@ -384,18 +487,6 @@ func (h *IssueHandler) FixPullRequest(owner, repo string, prNum int64, headSHA s
 		return
 	}
 
-	state := loadStatus(h.Developer, owner, repo, prNum)
-	cfg := h.Cfg.Issue.Webhook
-	if state.Escalated {
-		return
-	}
-	if state.CIFix[headSHA] >= cfg.CIFixMaxPerSHA || state.totalCIFixes() >= cfg.CIFixMaxPerPR {
-		h.escalateToArchitect(owner, repo, pr)
-		return
-	}
-
-	// A distinct local branch avoids "already checked out" conflicts with the
-	// issue worktree that owns the PR's head branch.
 	branch := pr.Head.Ref
 	localBranch := fmt.Sprintf("fix/pr-%d", prNum)
 	path := h.worktreePath(fmt.Sprintf("pr-%d", prNum))
@@ -404,10 +495,23 @@ func (h *IssueHandler) FixPullRequest(owner, repo string, prNum int64, headSHA s
 		return
 	}
 
-	// Reproduce the failure locally; the check output is the fix context.
-	checkOut, checkErr := h.runChecks(path)
+	checkOut, checkErr := h.runPullRequestChecks(path, owner, repo, prNum)
 	if checkErr == nil {
 		fmt.Printf("[fixer] Checks pass locally for PR #%d, nothing to fix\n", prNum)
+		return
+	}
+	h.fixPullRequestCore(owner, repo, pr, path, localBranch, branch, headSHA, checkOut)
+}
+
+func (h *IssueHandler) fixPullRequestCore(owner, repo string, pr *sdk.PullRequest, path, localBranch, branch, headSHA, checkOut string) {
+	prNum := pr.Index
+	state := loadStatus(h.Developer, owner, repo, prNum)
+	cfg := h.Cfg.Issue.Webhook
+	if state.Escalated {
+		return
+	}
+	if state.CIFix[headSHA] >= cfg.CIFixMaxPerSHA || state.totalCIFixes() >= cfg.CIFixMaxPerPR {
+		h.escalateToArchitect(owner, repo, pr)
 		return
 	}
 
@@ -443,14 +547,16 @@ CI failed on branch %s. Reproduce and fix the failures, then make
 		fmt.Printf("[fixer] Checks still failing for PR #%d after fix: %s\n", prNum, out)
 		return
 	}
+	if out, err := h.runPullRequestChecks(path, owner, repo, prNum); err != nil {
+		fmt.Printf("[fixer] PR policy still failing for PR #%d after fix: %s\n", prNum, out)
+		return
+	}
 
 	if err := h.commitFix(path, localBranch, branch, "fix(ci): repair failing checks"); err != nil {
 		fmt.Printf("[fixer] Failed to push fix for PR #%d: %v\n", prNum, err)
 		return
 	}
 
-	// Budget is consumed only by a pushed fix: a pushed commit re-triggers CI
-	// and may loop, while failed attempts terminate on their own.
 	_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
 		if s.CIFix == nil {
 			s.CIFix = map[string]int{}
@@ -622,11 +728,22 @@ Verdict: APPROVE or REQUEST_CHANGES
 	})
 
 	requestChanges, inScope, outScope := parseReview(out)
+	_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
+		if requestChanges {
+			s.ApprovedForMerge = false
+		} else if strings.Contains(out, "Verdict: APPROVE") {
+			s.ApprovedForMerge = true
+		}
+	})
 	if outScope != "" {
 		h.fileFollowUpIssue(owner, repo, pr, outScope)
 	}
 	if requestChanges && inScope != "" {
 		h.fixReviewFindings(owner, repo, pr, inScope, state.ReviewFixes)
+		return
+	}
+	if !requestChanges && strings.Contains(out, "Verdict: APPROVE") {
+		h.doSyncPullRequest(owner, repo, prNum)
 	}
 }
 

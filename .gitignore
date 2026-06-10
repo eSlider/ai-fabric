@@ -6,6 +6,7 @@ dist/
 
 # Local/editor noise
 .DS_Store
+.docker/
 .idea/
 .vscode/
 .cursor/

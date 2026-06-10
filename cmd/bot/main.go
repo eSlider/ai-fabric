@@ -86,7 +86,7 @@ func main() {
 			out += "\n\n" + runScript("bin/test.sh", 120*time.Second)
 			_ = reply(bot, update.Message.Chat.ID, trimLen(out, 3900))
 		case "/up":
-			_ = reply(bot, update.Message.Chat.ID, runScript("bin/up.sh", 180*time.Second))
+			_ = reply(bot, update.Message.Chat.ID, runScript("bin/up.sh", 180*time.Second, "--no-build"))
 		case "/down":
 			_ = reply(bot, update.Message.Chat.ID, runScript("bin/down.sh", 180*time.Second))
 		case "/logs":
@@ -183,23 +183,28 @@ func health(cfg config) string {
 	return fmt.Sprintf("Gitea health status: %d", resp.StatusCode)
 }
 
-func runScript(path string, timeout time.Duration) string {
+func runScript(path string, timeout time.Duration, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", path)
+	cmdArgs := append([]string{path}, args...)
+	cmd := exec.CommandContext(ctx, "bash", cmdArgs...)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Sprintf("%s failed: %v\n%s", path, err, string(out))
+	label := path
+	if len(args) > 0 {
+		label += " " + strings.Join(args, " ")
 	}
-	return fmt.Sprintf("%s ok\n%s", path, string(out))
+	if err != nil {
+		return fmt.Sprintf("%s failed: %v\n%s", label, err, string(out))
+	}
+	return fmt.Sprintf("%s ok\n%s", label, string(out))
 }
 
 func runComposeLogs(service string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "logs", "--tail", "80", service)
+	cmd := exec.CommandContext(ctx, "bash", "bin/compose.sh", "-f", "docker-compose.yml", "logs", "--tail", "80", service)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("logs failed: %v\n%s", err, string(out))

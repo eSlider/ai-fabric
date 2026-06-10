@@ -13,11 +13,11 @@ mkdir -p "${OUT_DIR}"
 
 # A consistent SQLite snapshot requires Gitea to be paused.
 echo "Stopping gitea for a consistent snapshot..."
-docker compose --project-directory "${ROOT_DIR}" stop gitea
+"${ROOT_DIR}/bin/compose.sh" --project-directory "${ROOT_DIR}" stop gitea
 
 cleanup() {
   echo "Starting gitea back up..."
-  docker compose --project-directory "${ROOT_DIR}" start gitea
+  "${ROOT_DIR}/bin/compose.sh" --project-directory "${ROOT_DIR}" start gitea
 }
 trap cleanup EXIT
 

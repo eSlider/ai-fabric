@@ -35,7 +35,10 @@ type workStatus struct {
 	ReviewedSHAs []string `yaml:"reviewed_shas,omitempty"`
 	// ReviewFixes counts developer rounds addressing reviewer REQUEST_CHANGES.
 	ReviewFixes int  `yaml:"review_fixes,omitempty"`
-	Escalated   bool `yaml:"escalated,omitempty"`
+	// ApprovedForMerge is set when the automated reviewer APPROVEs the current
+	// head; cleared on REQUEST_CHANGES. Used to merge latest base before land.
+	ApprovedForMerge bool `yaml:"approved_for_merge,omitempty"`
+	Escalated        bool `yaml:"escalated,omitempty"`
 }
 
 func (s *workStatus) totalCIFixes() int {

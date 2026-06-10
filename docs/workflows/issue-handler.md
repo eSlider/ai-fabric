@@ -23,7 +23,10 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
 2. Webhooks on `:8082` (`/webhook`, HMAC-validated with `GITEA_WEBHOOK_SECRET`):
    - `issues` (opened) — architect analysis starts immediately.
    - `pull_request` (opened/synchronized) — automated review; (closed+merged) — linked issue gets `status:completed`.
-   - `status` (commit status failure from Gitea Actions) — CI fixer for the matching PR.
+   - `status` (commit status failure from Gitea Actions) — CI fixer for the matching
+     open PR; when no PR owns the failing SHA but the commit is on the base branch
+     (typical post-merge main failure), a new `[ci] <branch> check failure at …`
+     issue is filed once per commit.
 3. One-shot CLI: `issue-handler --once [--issue-number <id>]`.
 
 ## Flow
@@ -39,15 +42,21 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
    pushed fix consumes budget; failed or no-op attempts do not). When the
    budget is exhausted the architect posts a one-time design review, the PR
    and the linked issue get `status:needs_human`, and automation stops.
+   Post-merge failures on the base branch (no open PR for the SHA) file a
+   dedicated `[ci]` issue instead; that issue enters the normal
+   architect-developer flow.
 4. Review loop: the reviewer separates findings into in-scope and
    out-of-scope. On REQUEST_CHANGES the developer addresses the in-scope
    findings and pushes (at most `ISSUE_REVIEW_FIX_MAX_PER_PR` rounds, then
    `status:needs_human`); the new head is reviewed again. Out-of-scope
    findings are filed once per PR as a separate `[follow-up]` issue that
-   enters the normal architect-developer flow.
-5. Conflicts: the poller detects open PRs that became unmergeable after the
-   base moved; the developer agent merges the base into the head, resolves
-   conflicts and pushes (which re-runs CI and review).
+   enters the normal architect-developer flow. On APPROVE the PR branch is
+   merged with the latest base; if checks fail after that merge the developer
+   fixer runs in the same cycle (CI webhooks retry if the PR was still busy).
+5. Conflicts and drift: the poller merges base into open PRs that conflict
+   with base, and also into **approved** PRs that fell behind base while
+   staying mergeable; conflicts are resolved by the developer agent, checks
+   are verified, and CI failures are fixed before the cycle ends.
 6. Merge: the linked issue gets `status:completed`, the architect's "## Tasks"
    checklist in the issue body is ticked, and the issue is closed unless
    another open PR still references it.
