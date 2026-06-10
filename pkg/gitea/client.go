@@ -5,6 +5,7 @@ package gitea
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -29,6 +30,8 @@ type Client interface {
 	GetPullRequest(owner, repo string, number int64) (*sdk.PullRequest, error)
 	MergePullRequest(owner, repo string, number int64) error
 	CloseIssue(owner, repo string, number int64) error
+	ListOwnerRepos(owner string, limit int) ([]*sdk.Repository, error)
+	BaseURL() string
 }
 
 // Service implements Client on top of the official Gitea SDK.
@@ -45,6 +48,56 @@ func NewService(cfg BotConfig) *Service {
 	return &Service{cfg: cfg, labelIDs: map[string]int64{}}
 }
 
+func (s *Service) BaseURL() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.BaseURL
+}
+
+func (s *Service) resetSDKClient() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.helper = nil
+	s.currentUser = nil
+}
+
+func withSDK[T any](s *Service, call func(*sdk.Client) (T, error)) (T, error) {
+	var zero T
+	cli, err := s.sdkClient()
+	if err != nil {
+		return zero, err
+	}
+	result, err := call(cli)
+	if err == nil {
+		return result, nil
+	}
+	if fallback, ok := FallbackBaseURLForDNSError(s.cfg.BaseURL, err); ok {
+		s.resetSDKClient()
+		s.mu.Lock()
+		s.cfg.BaseURL = fallback
+		s.mu.Unlock()
+		cli, err = s.sdkClient()
+		if err != nil {
+			return zero, err
+		}
+		return call(cli)
+	}
+	return zero, err
+}
+
+func isNotFoundHTTP(resp *sdk.Response, err error) bool {
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
+		return true
+	}
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "404") || strings.Contains(msg, "not found") {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) sdkClient() (*sdk.Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,7 +110,17 @@ func (s *Service) sdkClient() (*sdk.Client, error) {
 		Owner: s.cfg.Owner,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gitea client init: %w", err)
+		if fallback, ok := FallbackBaseURLForDNSError(s.cfg.BaseURL, err); ok {
+			s.cfg.BaseURL = fallback
+			cli, err = helpers.NewClient(helpers.Config{
+				URL:   fallback,
+				Token: s.cfg.Token,
+				Owner: s.cfg.Owner,
+			})
+		}
+		if err != nil {
+			return nil, fmt.Errorf("gitea client init: %w", err)
+		}
 	}
 	s.helper = cli
 	return cli.SDK, nil
@@ -68,11 +131,10 @@ func (s *Service) CurrentUser() (*sdk.User, error) {
 	if s.currentUser != nil {
 		return s.currentUser, nil
 	}
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	user, _, err := cli.GetMyUserInfo()
+	user, err := withSDK(s, func(cli *sdk.Client) (*sdk.User, error) {
+		user, _, err := cli.GetMyUserInfo()
+		return user, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea current user: %w", err)
 	}
@@ -80,13 +142,36 @@ func (s *Service) CurrentUser() (*sdk.User, error) {
 	return user, nil
 }
 
+// ListOwnerRepos lists repositories for owner, trying org first then user on 404.
+func (s *Service) ListOwnerRepos(owner string, limit int) ([]*sdk.Repository, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	repos, err := withSDK(s, func(cli *sdk.Client) ([]*sdk.Repository, error) {
+		listOpt := sdk.ListOrgReposOptions{
+			ListOptions: sdk.ListOptions{Page: 1, PageSize: limit},
+		}
+		repos, resp, err := cli.ListOrgRepos(owner, listOpt)
+		if err != nil && isNotFoundHTTP(resp, err) {
+			userOpt := sdk.ListReposOptions{
+				ListOptions: sdk.ListOptions{Page: 1, PageSize: limit},
+			}
+			repos, _, err = cli.ListUserRepos(owner, userOpt)
+		}
+		return repos, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gitea list repos for %s: %w", owner, err)
+	}
+	return repos, nil
+}
+
 // CreateIssue opens a new issue.
 func (s *Service) CreateIssue(owner, repo, title, body string) (*sdk.Issue, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	issue, _, err := cli.CreateIssue(owner, repo, sdk.CreateIssueOption{Title: title, Body: body})
+	issue, err := withSDK(s, func(cli *sdk.Client) (*sdk.Issue, error) {
+		issue, _, err := cli.CreateIssue(owner, repo, sdk.CreateIssueOption{Title: title, Body: body})
+		return issue, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea create issue %s/%s: %w", owner, repo, err)
 	}
@@ -95,17 +180,17 @@ func (s *Service) CreateIssue(owner, repo, title, body string) (*sdk.Issue, erro
 
 // ListOpenIssues returns all open non-PR issues.
 func (s *Service) ListOpenIssues(owner, repo string) ([]*sdk.Issue, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
 	const pageSize = 50
 	var all []*sdk.Issue
 	for page := 1; ; page++ {
-		issues, _, err := cli.ListRepoIssues(owner, repo, sdk.ListIssueOption{
-			State:       sdk.StateOpen,
-			Type:        sdk.IssueTypeIssue,
-			ListOptions: sdk.ListOptions{Page: page, PageSize: pageSize},
+		pageNum := page
+		issues, err := withSDK(s, func(cli *sdk.Client) ([]*sdk.Issue, error) {
+			issues, _, err := cli.ListRepoIssues(owner, repo, sdk.ListIssueOption{
+				State:       sdk.StateOpen,
+				Type:        sdk.IssueTypeIssue,
+				ListOptions: sdk.ListOptions{Page: pageNum, PageSize: pageSize},
+			})
+			return issues, err
 		})
 		if err != nil {
 			return nil, fmt.Errorf("gitea list issues %s/%s page %d: %w", owner, repo, page, err)
@@ -118,11 +203,10 @@ func (s *Service) ListOpenIssues(owner, repo string) ([]*sdk.Issue, error) {
 }
 
 func (s *Service) GetIssue(owner, repo string, number int64) (*sdk.Issue, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	issue, _, err := cli.GetIssue(owner, repo, number)
+	issue, err := withSDK(s, func(cli *sdk.Client) (*sdk.Issue, error) {
+		issue, _, err := cli.GetIssue(owner, repo, number)
+		return issue, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea get issue %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -130,11 +214,10 @@ func (s *Service) GetIssue(owner, repo string, number int64) (*sdk.Issue, error)
 }
 
 func (s *Service) UpdateIssueBody(owner, repo string, number int64, body string) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	_, _, err = cli.EditIssue(owner, repo, number, sdk.EditIssueOption{Body: &body})
+	_, err := withSDK(s, func(cli *sdk.Client) (struct{}, error) {
+		_, _, err := cli.EditIssue(owner, repo, number, sdk.EditIssueOption{Body: &body})
+		return struct{}{}, err
+	})
 	if err != nil {
 		return fmt.Errorf("gitea edit issue %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -142,11 +225,10 @@ func (s *Service) UpdateIssueBody(owner, repo string, number int64, body string)
 }
 
 func (s *Service) CreateIssueComment(owner, repo string, number int64, body string) (*sdk.Comment, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	comment, _, err := cli.CreateIssueComment(owner, repo, number, sdk.CreateIssueCommentOption{Body: body})
+	comment, err := withSDK(s, func(cli *sdk.Client) (*sdk.Comment, error) {
+		comment, _, err := cli.CreateIssueComment(owner, repo, number, sdk.CreateIssueCommentOption{Body: body})
+		return comment, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea comment issue %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -154,11 +236,10 @@ func (s *Service) CreateIssueComment(owner, repo string, number int64, body stri
 }
 
 func (s *Service) EditIssueComment(owner, repo string, commentID int64, body string) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	_, _, err = cli.EditIssueComment(owner, repo, commentID, sdk.EditIssueCommentOption{Body: body})
+	_, err := withSDK(s, func(cli *sdk.Client) (struct{}, error) {
+		_, _, err := cli.EditIssueComment(owner, repo, commentID, sdk.EditIssueCommentOption{Body: body})
+		return struct{}{}, err
+	})
 	if err != nil {
 		return fmt.Errorf("gitea edit comment %s/%s id=%d: %w", owner, repo, commentID, err)
 	}
@@ -166,11 +247,10 @@ func (s *Service) EditIssueComment(owner, repo string, commentID int64, body str
 }
 
 func (s *Service) ListIssueComments(owner, repo string, number int64) ([]*sdk.Comment, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	comments, _, err := cli.ListIssueComments(owner, repo, number, sdk.ListIssueCommentOptions{})
+	comments, err := withSDK(s, func(cli *sdk.Client) ([]*sdk.Comment, error) {
+		comments, _, err := cli.ListIssueComments(owner, repo, number, sdk.ListIssueCommentOptions{})
+		return comments, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea list comments %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -178,35 +258,38 @@ func (s *Service) ListIssueComments(owner, repo string, number int64) ([]*sdk.Co
 }
 
 func (s *Service) AddIssueLabel(owner, repo string, number int64, label string) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	id, err := s.labelID(cli, owner, repo, label, true)
-	if err != nil {
-		return err
-	}
-	_, _, err = cli.AddIssueLabels(owner, repo, number, sdk.IssueLabelsOption{Labels: []int64{id}})
-	if err != nil {
-		return fmt.Errorf("gitea add label %q to %s/%s#%d: %w", label, owner, repo, number, err)
-	}
-	return nil
+	return s.withIssueClient(func(cli *sdk.Client) error {
+		id, err := s.labelID(cli, owner, repo, label, true)
+		if err != nil {
+			return err
+		}
+		_, _, err = cli.AddIssueLabels(owner, repo, number, sdk.IssueLabelsOption{Labels: []int64{id}})
+		if err != nil {
+			return fmt.Errorf("gitea add label %q to %s/%s#%d: %w", label, owner, repo, number, err)
+		}
+		return nil
+	})
 }
 
 func (s *Service) RemoveIssueLabel(owner, repo string, number int64, label string) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	id, err := s.labelID(cli, owner, repo, label, false)
-	if err != nil || id == 0 {
-		return err
-	}
-	_, err = cli.DeleteIssueLabel(owner, repo, number, id)
-	if err != nil {
-		return fmt.Errorf("gitea remove label %q from %s/%s#%d: %w", label, owner, repo, number, err)
-	}
-	return nil
+	return s.withIssueClient(func(cli *sdk.Client) error {
+		id, err := s.labelID(cli, owner, repo, label, false)
+		if err != nil || id == 0 {
+			return err
+		}
+		_, err = cli.DeleteIssueLabel(owner, repo, number, id)
+		if err != nil {
+			return fmt.Errorf("gitea remove label %q from %s/%s#%d: %w", label, owner, repo, number, err)
+		}
+		return nil
+	})
+}
+
+func (s *Service) withIssueClient(call func(*sdk.Client) error) error {
+	_, err := withSDK(s, func(cli *sdk.Client) (struct{}, error) {
+		return struct{}{}, call(cli)
+	})
+	return err
 }
 
 // labelID resolves a repo label name to its ID, optionally creating the label.
@@ -257,11 +340,10 @@ func labelColor(label string) string {
 }
 
 func (s *Service) CreatePullRequest(owner, repo string, opt sdk.CreatePullRequestOption) (*sdk.PullRequest, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	pr, _, err := cli.CreatePullRequest(owner, repo, opt)
+	pr, err := withSDK(s, func(cli *sdk.Client) (*sdk.PullRequest, error) {
+		pr, _, err := cli.CreatePullRequest(owner, repo, opt)
+		return pr, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea create PR %s/%s head=%s: %w", owner, repo, opt.Head, err)
 	}
@@ -269,13 +351,12 @@ func (s *Service) CreatePullRequest(owner, repo string, opt sdk.CreatePullReques
 }
 
 func (s *Service) ListOpenPullRequests(owner, repo string) ([]*sdk.PullRequest, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	prs, _, err := cli.ListRepoPullRequests(owner, repo, sdk.ListPullRequestsOptions{
-		State:       sdk.StateOpen,
-		ListOptions: sdk.ListOptions{PageSize: 50},
+	prs, err := withSDK(s, func(cli *sdk.Client) ([]*sdk.PullRequest, error) {
+		prs, _, err := cli.ListRepoPullRequests(owner, repo, sdk.ListPullRequestsOptions{
+			State:       sdk.StateOpen,
+			ListOptions: sdk.ListOptions{PageSize: 50},
+		})
+		return prs, err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea list PRs %s/%s: %w", owner, repo, err)
@@ -284,11 +365,10 @@ func (s *Service) ListOpenPullRequests(owner, repo string) ([]*sdk.PullRequest, 
 }
 
 func (s *Service) GetPullRequest(owner, repo string, number int64) (*sdk.PullRequest, error) {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return nil, err
-	}
-	pr, _, err := cli.GetPullRequest(owner, repo, number)
+	pr, err := withSDK(s, func(cli *sdk.Client) (*sdk.PullRequest, error) {
+		pr, _, err := cli.GetPullRequest(owner, repo, number)
+		return pr, err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gitea get PR %s/%s#%d: %w", owner, repo, number, err)
 	}
@@ -297,12 +377,11 @@ func (s *Service) GetPullRequest(owner, repo string, number int64) (*sdk.PullReq
 
 // MergePullRequest merges an open PR with the default merge style.
 func (s *Service) MergePullRequest(owner, repo string, number int64) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	merged, _, err := cli.MergePullRequest(owner, repo, number, sdk.MergePullRequestOption{
-		Style: sdk.MergeStyleMerge,
+	merged, err := withSDK(s, func(cli *sdk.Client) (bool, error) {
+		merged, _, err := cli.MergePullRequest(owner, repo, number, sdk.MergePullRequestOption{
+			Style: sdk.MergeStyleMerge,
+		})
+		return merged, err
 	})
 	if err != nil {
 		return fmt.Errorf("gitea merge PR %s/%s#%d: %w", owner, repo, number, err)
@@ -315,12 +394,11 @@ func (s *Service) MergePullRequest(owner, repo string, number int64) error {
 
 // CloseIssue closes an issue.
 func (s *Service) CloseIssue(owner, repo string, number int64) error {
-	cli, err := s.sdkClient()
-	if err != nil {
-		return err
-	}
-	closed := sdk.StateClosed
-	_, _, err = cli.EditIssue(owner, repo, number, sdk.EditIssueOption{State: &closed})
+	_, err := withSDK(s, func(cli *sdk.Client) (struct{}, error) {
+		closed := sdk.StateClosed
+		_, _, err := cli.EditIssue(owner, repo, number, sdk.EditIssueOption{State: &closed})
+		return struct{}{}, err
+	})
 	if err != nil {
 		return fmt.Errorf("gitea close issue %s/%s#%d: %w", owner, repo, number, err)
 	}

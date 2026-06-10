@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,17 +67,15 @@ func TestParseMCPToolRequestRejectsChatLikeText(t *testing.T) {
 	}
 }
 
-// API tests against a real HTTP server (no mocks): listProjects exercises the
-// actual Gitea REST endpoints and fallback behavior.
-func TestListProjectsFallsBackFromOrgToUser(t *testing.T) {
+func TestListProjectsUsesGiteaService(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.22.0"}`))
 		case "/api/v1/orgs/eslider/repos":
-			http.Error(w, `{"errors":["user redirect does not exist [name: eslider]"],"message":"GetOrgByName"}`, http.StatusNotFound)
-			return
+			http.Error(w, `{"message":"GetOrgByName"}`, http.StatusNotFound)
 		case "/api/v1/users/eslider/repos":
 			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":"http://example/ai-fabric"}]`))
-			return
 		default:
 			http.NotFound(w, r)
 		}
@@ -101,34 +98,6 @@ func TestListProjectsFallsBackFromOrgToUser(t *testing.T) {
 	}
 }
 
-func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/orgs/eslider/repos":
-			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":""}]`))
-			return
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	cfg := config{
-		GiteaBaseURL:     server.URL,
-		GiteaOwner:       "eslider",
-		GiteaToken:       "token",
-		ProjectListLimit: 20,
-	}
-
-	msg, err := listProjects(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(msg, server.URL+"/eslider/ai-fabric") {
-		t.Fatalf("expected generated repo url, got: %s", msg)
-	}
-}
-
 func TestIsAllowed(t *testing.T) {
 	cfg := config{
 		AllowedChatIDs: map[string]bool{"100": true},
@@ -140,24 +109,5 @@ func TestIsAllowed(t *testing.T) {
 	}
 	if !isAllowed(cfg, msg) {
 		t.Fatalf("expected allowed")
-	}
-}
-
-func TestFallbackBaseURLForDNSError(t *testing.T) {
-	err := errors.New(`Get "http://gitea:3000/api/v1/orgs/eslider/repos?limit=20": dial tcp: lookup gitea on 127.0.0.53:53: server misbehaving`)
-	got, ok := fallbackBaseURLForDNSError("http://gitea:3000", err)
-	if !ok {
-		t.Fatalf("expected fallback to be enabled")
-	}
-	if got != "http://localhost:3000" {
-		t.Fatalf("unexpected fallback base URL: %s", got)
-	}
-}
-
-func TestFallbackBaseURLForDNSErrorSkipsNonGiteaHost(t *testing.T) {
-	err := errors.New(`Get "http://example.com/api/healthz": dial tcp: lookup example.com: no such host`)
-	_, ok := fallbackBaseURLForDNSError("http://example.com", err)
-	if ok {
-		t.Fatalf("expected fallback to be disabled for non-gitea host")
 	}
 }

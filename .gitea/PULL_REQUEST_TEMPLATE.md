@@ -14,6 +14,13 @@ What can break? Include security/compatibility concerns.
 - [ ] `./bin/test.sh`
 - [ ] Manual checks performed (describe)
 
+## Reused
+Which existing packages/libraries were reused (per engineering-principles §1)?
+
+- `pkg/gitea` — typed Gitea client / service layer
+- `code.gitea.io/sdk/gitea` — official Gitea SDK types and API client
+- `github.com/eslider/go-gitea-helpers` — SDK client construction helpers
+
 ## Rollback
 How to safely rollback if this causes issues?
 
