@@ -7,7 +7,11 @@ mkdir -p /tmp/runner
 cd /tmp/runner
 
 if [ ! -f "${CONFIG_FILE}" ]; then
-  act_runner generate-config | sed 's#network: ""#network: "ai-fabric_default"#' > "${CONFIG_FILE}"
+  act_runner generate-config \
+    | sed 's#network: ""#network: "ai-fabric_default"#' \
+    | sed 's#  labels: \[\]#  labels:\
+    - "ubuntu-latest:docker://gitea/runner-images:ubuntu-latest"#' \
+    > "${CONFIG_FILE}"
 fi
 
 if [ -z "${GITEA_RUNNER_REGISTRATION_TOKEN:-}" ] || [ "${GITEA_RUNNER_REGISTRATION_TOKEN}" = "replace-with-runner-token" ]; then
@@ -19,7 +23,8 @@ if [ ! -f /tmp/runner/.runner ]; then
   act_runner register --no-interactive \
     --instance "${GITEA_INSTANCE_URL}" \
     --token "${GITEA_RUNNER_REGISTRATION_TOKEN}" \
-    --name "${GITEA_RUNNER_NAME}-${HOSTNAME}"
+    --name "${GITEA_RUNNER_NAME}-${HOSTNAME}" \
+    --labels "ubuntu-latest:docker://gitea/runner-images:ubuntu-latest"
   touch /tmp/runner/.runner
 fi
 

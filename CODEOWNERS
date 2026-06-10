@@ -1,7 +1,10 @@
-# Default review ownership. See docs/workflows/pr-best-practices.md.
-* @eslider
+# Required ownership policy file (see docs/workflows/pr-best-practices.md).
+# Critical paths: workflows, infra, scripts, and workflow docs.
+# Default owners for all other changes in this repository.
 
-/.gitea/ @eslider
-/bin/ @eslider
+.gitea/ @eslider
+bin/ @eslider
 docker-compose.yml @eslider
-/docs/workflows/ @eslider
+docs/workflows/ @eslider
+docs/skills/ @eslider
+* @eslider
