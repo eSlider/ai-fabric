@@ -13,6 +13,7 @@ PR description must include:
 - `## Solution`
 - `## Risks`
 - `## Test Plan`
+- `## Reused` — existing code/libraries reused (see `docs/skills/engineering-principles.md` §1)
 - `## Rollback`
 - `## Issue Link` with `Closes|Fixes|Refs #<id>`
 - `## AI Notes`
