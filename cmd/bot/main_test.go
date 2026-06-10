@@ -129,7 +129,7 @@ func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
 	}
 }
 
-func TestIsAllowed(t *testing.T) {
+func TestIsAllowedAuthorizesMatchingChatAndUser(t *testing.T) {
 	cfg := config{
 		AllowedChatIDs: map[string]bool{"100": true},
 		AllowedUsers:   map[string]bool{"alice": true},
@@ -139,7 +139,21 @@ func TestIsAllowed(t *testing.T) {
 		From: &tgbotapi.User{UserName: "alice"},
 	}
 	if !isAllowed(cfg, msg) {
-		t.Fatalf("expected allowed")
+		t.Fatalf("expected allowed for authorized chat ID and username")
+	}
+}
+
+func TestIsAllowedDeniesUnauthorizedChat(t *testing.T) {
+	cfg := config{
+		AllowedChatIDs: map[string]bool{"100": true},
+		AllowedUsers:   map[string]bool{"alice": true},
+	}
+	msg := &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 999},
+		From: &tgbotapi.User{UserName: "bob"},
+	}
+	if isAllowed(cfg, msg) {
+		t.Fatalf("expected denied for unauthorized chat ID and username")
 	}
 }
 
