@@ -15,7 +15,7 @@ What can break? Include security/compatibility concerns.
 - [ ] Manual checks performed (describe)
 
 ## Reused
-Which existing packages/libraries were reused (per engineering-principles §1)?
+Existing code, libraries, or SDK types reused instead of reimplementing (engineering-principles §1):
 
 - `pkg/gitea` — typed Gitea client / service layer
 - `code.gitea.io/sdk/gitea` — official Gitea SDK types and API client
