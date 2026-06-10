@@ -2,67 +2,81 @@
 
 ## Purpose
 
-Automatically process each open issue by delegating implementation to an agent, then opening a PR with changes.
+Automatically process each open issue: the architect analyses the task first,
+the developer implements it on a branch and opens a PR, CI failures are fixed
+within a bounded budget, and the result is reviewed automatically.
 
-## Runtime
+## Roles (separate Gitea users)
 
-- Go runtime command: `cmd/issue-handler/main.go`
-- Compose service: `issue-handler`
-- Telegram `/task` creation path can trigger immediate one-shot processing for the created issue.
-- Role skill docs:
-  - `docs/skills/solution-architect.md`
-  - `docs/skills/developer.md`
+| Role | Gitea user | Token env | Responsibility |
+|------|-----------|-----------|----------------|
+| Architect | `ai-architect` | `GITEA_ARCHITECT_TOKEN` | Analyses new issues, appends the solution structure to the issue body, reviews PRs whose fix budget is exhausted |
+| Developer | `ai-developer` | `GITEA_HANDLER_TOKEN` | Implements issues, commits/pushes (commits are authored as this user), fixes CI failures |
+| Reviewer | `ai-reviewer` | `GITEA_REVIEWER_TOKEN` | Posts one automated review per PR head SHA |
+
+All tokens fall back to `GITEA_BOT_TOKEN` when empty.
+
+## Triggers
+
+1. Polling: every `ISSUE_POLL_INTERVAL_SEC` (default 45s) all open issues are scanned.
+2. Webhooks on `:8082` (`/webhook`, HMAC-validated with `GITEA_WEBHOOK_SECRET`):
+   - `issues` (opened) — architect analysis starts immediately.
+   - `pull_request` (opened/synchronized) — automated review; (closed+merged) — linked issue gets `status:completed`.
+   - `status` (commit status failure from Gitea Actions) — CI fixer for the matching PR.
+3. One-shot CLI: `issue-handler --once [--issue-number <id>]`.
 
 ## Flow
 
-1. Poll open issues from Gitea (`state=open`).
-2. If `--issue-number` is set, process only that issue when open and not a PR.
-3. Load persisted state from `var/issue-handler/state.json`.
-4. Skip terminal statuses: `completed`, `failed_max_attempts`, `pr_opened`, `cancelled`.
-5. Enforce retry cooldown for `failed` status using `ISSUE_RETRY_INTERVAL_SEC`.
-6. Parse Telegram marker in issue body and send a start notification when available.
-7. In normal mode:
-   - add claim/progress comments to the issue
-   - update local state (`attempts`, `last_attempt`, `status=completed`)
-8. In dry-run mode (`ISSUE_HANDLER_DRY_RUN=1`):
-   - do not mutate Gitea issue state
-   - only update local state with `status=dry_run`
+1. Architect-first gate: until the issue body contains the
+   `ai-fabric:solution-architect` block, only the architect stage runs.
+   The developer starts on a later cycle, so the plan stays reviewable.
+2. Developer: worktree under `var/agents/issue-<N>`, agent run with the
+   cheapest non-fast composer model, local checks
+   (`fmt.sh && lint.sh && test.sh`), commit, push, PR with `Closes #N`.
+3. CI failure on the PR: developer fixer reproduces the failure locally and
+   pushes a fix — at most `2` attempts per head SHA, `6` per PR. When the
+   budget is exhausted the architect posts a one-time design review, the PR
+   and the linked issue get `status:needs_human`, and automation stops.
+4. Merge: linked issue is labeled `status:completed`.
 
-## Current vs Target
+## Loop prevention
 
-- Current implementation is a Go-first processing loop with state handling and Gitea transport abstraction.
-- Full architect/developer worktree automation and PR lifecycle parity are tracked in:
-  - `docs/workflows/python-to-go-migration.md`
+- `status:in_progress` is a lock: the poller skips such issues unless the
+  claim (stored in the status comment) is older than
+  `ISSUE_IN_PROGRESS_TIMEOUT_SEC` (default 3600).
+- An in-process busy map prevents concurrent processing of the same
+  issue/PR by overlapping cycles and webhooks.
+- Webhook events for issues created by the fabric's own users are ignored.
+- Reviews are deduplicated per PR head SHA; CI fixes are budgeted per SHA and
+  per PR.
+- Attempt counting lives in the machine-readable status comment, not in
+  comment text matching.
+
+## Status visibility
+
+- Labels are the primary signal: `status:in_progress`, `status:pr_opened`,
+  `status:failed`, `status:failed_max_attempts`, `status:needs_human`,
+  `status:completed`, `status:cancelled`, `status:dry_run`.
+- One bot-owned status comment per issue/PR is edited in place. It contains a
+  hidden YAML state block (stage, attempts, claimed_at, ci_fix, reviewed_shas)
+  plus a short human-readable summary. Progress does not spam comments.
+- Durable events only as separate comments: architect escalation, automated
+  review.
 
 ## Configuration
 
-Environment variables:
-
 - `ISSUE_POLL_INTERVAL_SEC` (default `45`)
-- `ISSUE_MAX_FIX_ATTEMPTS` (default `3`)
-- `ISSUE_RETRY_INTERVAL_SEC` (default `600`, retry delay for failed issues)
+- `ISSUE_MAX_FIX_ATTEMPTS` (default `3`, local check-fix loop per run)
+- `ISSUE_RETRY_INTERVAL_SEC` (default `600`, cooldown for `status:failed`)
+- `ISSUE_IN_PROGRESS_TIMEOUT_SEC` (default `3600`, stale claim reclaim)
 - `ISSUE_HANDLER_DRY_RUN` (`1` for safe dry-run)
-- `TELEGRAM_BOT_TOKEN` (optional; enables Telegram notifications from handler)
-- `GITEA_CLI_ENABLED` (`1` by default, prefer CLI transport for Gitea operations)
-- `GITEA_CLI_BIN` (optional local CLI binary path/name; when empty, dockerized `tea` is used)
-- `GITEA_CLI_IMAGE` (default `gitea/tea:latest`, used for dockerized CLI mode)
-- `GITEA_CLI_LOGIN` (default `ai-fabric`, login alias used by `tea`)
-- `GITEA_CLI_URL` (Gitea URL used by CLI login)
-- `GITEA_CLI_TOKEN` (token used by CLI login; defaults to `GITEA_BOT_TOKEN` when empty)
-- `GITEA_CLI_DOCKER_NETWORK` (default `host`, network mode for dockerized CLI)
-- `GITEA_TRANSPORT_PRIMARY` / `GITEA_PRIMARY_TRANSPORT` (`cli` or `sdk`)
-- `GITEA_CLI_FALLBACK_ENABLED` / `GITEA_TRANSPORT_CLI_FALLBACK` (enable secondary transport fallback)
-
-## Manual Trigger
-
-- Process one specific issue immediately:
-  - `issue-handler --once --issue-number <id>`
-- Process existing open issues once:
-  - `issue-handler --once`
+- `ISSUE_SMART_MODEL` (explicit agent model; default: first non-fast
+  `composer*` model from `agent --list-models`, else `auto`)
+- `ISSUE_ARCHITECT_ENABLED` (default `1`), `ISSUE_ARCHITECT_MAX_CHARS` (default `6000`)
+- `GITEA_WEBHOOK_SECRET` (HMAC validation of incoming webhooks)
+- `TELEGRAM_BOT_TOKEN` (optional, start notifications)
 
 ## State
 
-- Persistent state file: `var/issue-handler/state.json`
-- Idempotency rules:
-  - Terminal statuses are not reprocessed.
-  - Failed issues respect retry interval.
+- Worktrees: `var/agents/issue-<N>`, `var/agents/pr-<N>`, `var/agents/pr-<N>-review`.
+- Source of truth: Gitea labels + the YAML status comment. No local state files.

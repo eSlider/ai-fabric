@@ -2,7 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"example.org/ai-fabric/internal/config"
@@ -15,12 +17,24 @@ func main() {
 	flag.Parse()
 
 	cfg := config.LoadConfig()
+	log.Printf("[issue-handler] Config loaded. AgentBin: %s", cfg.Issue.AgentBin)
 
 	if cfg.Gitea.Token == "" {
 		log.Fatal("GITEA_BOT_TOKEN is required in environment")
 	}
 
 	handler := fabric.NewIssueHandler(cfg)
+
+	if !*once {
+		go func() {
+			addr := ":8082"
+			fmt.Printf("[issue-handler] Webhook server listening on %s\n", addr)
+			http.HandleFunc("/webhook", handler.ServeWebhook)
+			if err := http.ListenAndServe(addr, nil); err != nil {
+				log.Printf("Webhook server failed: %v", err)
+			}
+		}()
+	}
 
 	if *once {
 		handler.RunOnce(*issueNumber)

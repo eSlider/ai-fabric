@@ -1,5 +1,8 @@
 # Agent Guidelines
 
+Read `docs/skills/engineering-principles.md` first — its rules are inviolable
+and override anything below in case of conflict.
+
 ## Architecture And Boundaries
 
 - Read `docs/README.md` first, then workflow docs before implementation.
@@ -21,12 +24,17 @@
 - Prefer minimal, reversible changes over broad rewrites.
 - Keep behavior explicit and testable; avoid hidden side effects.
 - Prefer CLI/Bash integration patterns already used in this repo.
-- For Gitea operations in agent/shell flows, prefer `tea` CLI first; use SDK-backed paths only when CLI is not viable.
+- For Gitea operations in Go code, use the typed `pkg/gitea` client (official SDK types). In shell flows, plain `curl` against the REST API is fine.
 - Keep comments and docs concise, in English, and aligned with current behavior.
 
-## Testing And CI Expectations
+## Testing Policy: no mocks, no unit tests
 
-- Follow test-first development for new behavior and bug fixes.
+- Mock-based and isolated unit tests are forbidden — they camouflage problems. A test that mocks a collaborator is a bug.
+- Only use-case tests, API tests (real HTTP), and system tests (`//go:build system`) are allowed. See `docs/skills/engineering-principles.md` section 6.
+- Behavior-first: write the use-case test against the real stack before implementing.
+
+## CI Expectations
+
 - Validate locally before proposing/merging changes:
   - `bin/fmt.sh`
   - `bin/lint.sh`

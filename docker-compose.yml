@@ -9,13 +9,20 @@ x-go-service-base: &go-service-base
   network_mode: host
   volumes:
     - .:/workspace
-    - /home/user/.local/bin/agent:/usr/local/bin/agent:ro
+    - ./bin/issue-handler:/usr/local/bin/issue-handler:ro
+    - ./bin/tg-bot:/usr/local/bin/tg-bot:ro
+    - /home/user/.local/share/cursor-agent:/usr/local/share/cursor-agent:ro
+    - /home/user/.cursor:/workspace/.cursor
+    # cursor-agent CLI credentials (auth.json) live in XDG config dir
+    - /home/user/.config/cursor:/workspace/.config/cursor
     - /var/run/docker.sock:/var/run/docker.sock
   depends_on:
     gitea:
       condition: service_healthy
   env_file:
     - .env
+  environment:
+    - HOME=/workspace
   develop:
     watch:
       - action: rebuild
@@ -44,6 +51,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Allow webhooks to reach the issue-handler on the docker host.
+      GITEA__webhook__ALLOWED_HOST_LIST: "loopback,private,host.docker.internal"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "3000:3000"
       - "2222:22"
@@ -89,6 +101,7 @@ services:
     command: ["/app/gitea-mcp", "-t", "http", "-p", "8080"]
 
   issue-handler:
+    # Runs with host networking (see base); the webhook server listens on host port 8082.
     <<: *go-service-base
     command: ["issue-handler"]
     labels:

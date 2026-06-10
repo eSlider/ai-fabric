@@ -1,439 +1,280 @@
+// Package gitea provides a typed client for the Gitea API used by the fabric.
+// It reuses the official Gitea SDK types (sdk.Issue, sdk.PullRequest, ...) as
+// domain types instead of duplicating them.
 package gitea
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"os/exec"
 	"strings"
-	"time"
+	"sync"
 
 	sdk "code.gitea.io/sdk/gitea"
 	helpers "github.com/eslider/go-gitea-helpers"
 )
 
-const (
-	defaultHTTPTimeout   = 40 * time.Second
-	defaultCommandTimout = 60 * time.Second
-)
-
-// Client exposes Gitea operations used by issue-handler.
-// It intentionally uses map-based payloads to keep integration with existing handler code minimal.
+// Client exposes the Gitea operations used by the fabric, with SDK types as the boundary.
 type Client interface {
-	ListOpenIssues(ctx context.Context, owner, repo string) ([]map[string]interface{}, error)
-	GetIssue(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error)
-	CreateIssueComment(ctx context.Context, owner, repo string, number int, body string) error
-	UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error
-	UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error
-	CreatePullRequest(ctx context.Context, owner, repo string, opts map[string]interface{}) (map[string]interface{}, error)
-	ListPullRequests(ctx context.Context, owner, repo string, state string) ([]map[string]interface{}, error)
+	CurrentUser() (*sdk.User, error)
+	ListOpenIssues(owner, repo string) ([]*sdk.Issue, error)
+	GetIssue(owner, repo string, number int64) (*sdk.Issue, error)
+	UpdateIssueBody(owner, repo string, number int64, body string) error
+	CreateIssueComment(owner, repo string, number int64, body string) (*sdk.Comment, error)
+	EditIssueComment(owner, repo string, commentID int64, body string) error
+	ListIssueComments(owner, repo string, number int64) ([]*sdk.Comment, error)
+	AddIssueLabel(owner, repo string, number int64, label string) error
+	RemoveIssueLabel(owner, repo string, number int64, label string) error
+	CreatePullRequest(owner, repo string, opt sdk.CreatePullRequestOption) (*sdk.PullRequest, error)
+	ListOpenPullRequests(owner, repo string) ([]*sdk.PullRequest, error)
+	GetPullRequest(owner, repo string, number int64) (*sdk.PullRequest, error)
 }
 
+// Service implements Client on top of the official Gitea SDK.
 type Service struct {
-	cfg          Config
-	rootDir      string
-	teaConfigDir string
+	cfg BotConfig
 
-	helperClient  *helpers.Client
-	teaLoginReady bool
+	mu          sync.Mutex
+	helper      *helpers.Client
+	currentUser *sdk.User
+	labelIDs    map[string]int64 // "owner/repo/label" -> label ID
 }
 
-func NewService(cfg Config, rootDir, teaConfigDir string) *Service {
-	cfg.Normalize()
-	return &Service{
-		cfg:          cfg,
-		rootDir:      rootDir,
-		teaConfigDir: teaConfigDir,
+func NewService(cfg BotConfig) *Service {
+	return &Service{cfg: cfg, labelIDs: map[string]int64{}}
+}
+
+func (s *Service) sdkClient() (*sdk.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.helper != nil {
+		return s.helper.SDK, nil
 	}
-}
-
-func (s *Service) ListOpenIssues(ctx context.Context, owner, repo string) ([]map[string]interface{}, error) {
-	primary := strings.ToLower(strings.TrimSpace(s.cfg.PrimaryTransport))
-	switch primary {
-	case "cli":
-		issues, err := s.listOpenIssuesCLI(ctx, owner, repo)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return issues, err
-		}
-		return s.listOpenIssuesSDK(ctx, owner, repo)
-	default:
-		issues, err := s.listOpenIssuesSDK(ctx, owner, repo)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return issues, err
-		}
-		return s.listOpenIssuesCLI(ctx, owner, repo)
+	cli, err := helpers.NewClient(helpers.Config{
+		URL:   s.cfg.BaseURL,
+		Token: s.cfg.Token,
+		Owner: s.cfg.Owner,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gitea client init: %w", err)
 	}
+	s.helper = cli
+	return cli.SDK, nil
 }
 
-func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error) {
-	primary := strings.ToLower(strings.TrimSpace(s.cfg.PrimaryTransport))
-	switch primary {
-	case "cli":
-		issue, err := s.getIssueCLI(ctx, owner, repo, number)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return issue, err
-		}
-		return s.getIssueSDK(ctx, owner, repo, number)
-	default:
-		issue, err := s.getIssueSDK(ctx, owner, repo, number)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return issue, err
-		}
-		return s.getIssueCLI(ctx, owner, repo, number)
+// CurrentUser returns (and caches) the user owning the configured token.
+func (s *Service) CurrentUser() (*sdk.User, error) {
+	if s.currentUser != nil {
+		return s.currentUser, nil
 	}
-}
-
-func (s *Service) CreateIssueComment(ctx context.Context, owner, repo string, number int, body string) error {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, number)
-	payload := map[string]interface{}{"body": body}
-	_, err := s.request(ctx, http.MethodPost, path, payload)
-	return err
-}
-
-func (s *Service) UpdateIssueState(ctx context.Context, owner, repo string, number int, state string) error {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
-	payload := map[string]interface{}{"state": state}
-	_, err := s.request(ctx, http.MethodPatch, path, payload)
-	return err
-}
-func (s *Service) UpdateIssueBody(ctx context.Context, owner, repo string, number int, body string) error {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
-	payload := map[string]interface{}{"body": body}
-	_, err := s.request(ctx, http.MethodPatch, path, payload)
-	return err
-}
-
-func (s *Service) CreatePullRequest(ctx context.Context, owner, repo string, opts map[string]interface{}) (map[string]interface{}, error) {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/pulls", owner, repo)
-	res, err := s.request(ctx, http.MethodPost, path, opts)
+	cli, err := s.sdkClient()
 	if err != nil {
 		return nil, err
 	}
-	pr, ok := res.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected PR response type: %T", res)
+	user, _, err := cli.GetMyUserInfo()
+	if err != nil {
+		return nil, fmt.Errorf("gitea current user: %w", err)
 	}
-	return pr, nil
+	s.currentUser = user
+	return user, nil
 }
 
-func (s *Service) ListPullRequests(ctx context.Context, owner, repo string, state string) ([]map[string]interface{}, error) {
-	if state == "" {
-		state = "open"
-	}
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/pulls?state=%s", owner, repo, state)
-	res, err := s.request(ctx, http.MethodGet, path, nil)
+// ListOpenIssues returns all open non-PR issues.
+func (s *Service) ListOpenIssues(owner, repo string) ([]*sdk.Issue, error) {
+	cli, err := s.sdkClient()
 	if err != nil {
 		return nil, err
 	}
-	items, ok := res.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected PR list response type: %T", res)
-	}
-	out := make([]map[string]interface{}, 0, len(items))
-	for _, item := range items {
-		if pr, ok := item.(map[string]interface{}); ok {
-			out = append(out, pr)
-		}
-	}
-	return out, nil
-}
-
-func (s *Service) listOpenIssuesSDK(ctx context.Context, owner, repo string) ([]map[string]interface{}, error) {
-	cli, err := s.ensureSDKClient()
-	if err != nil {
-		return nil, err
-	}
-
 	const pageSize = 50
-	all := make([]map[string]interface{}, 0, pageSize)
+	var all []*sdk.Issue
 	for page := 1; ; page++ {
-		issues, _, err := cli.SDK.ListRepoIssues(owner, repo, sdk.ListIssueOption{
-			State: sdk.StateOpen,
-			ListOptions: sdk.ListOptions{
-				Page:     page,
-				PageSize: pageSize,
-			},
+		issues, _, err := cli.ListRepoIssues(owner, repo, sdk.ListIssueOption{
+			State:       sdk.StateOpen,
+			Type:        sdk.IssueTypeIssue,
+			ListOptions: sdk.ListOptions{Page: page, PageSize: pageSize},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("gitea sdk list issues %s/%s page %d: %w", owner, repo, page, err)
+			return nil, fmt.Errorf("gitea list issues %s/%s page %d: %w", owner, repo, page, err)
 		}
 		if len(issues) == 0 {
-			break
+			return all, nil
 		}
-		for _, issue := range issues {
-			item, err := marshalToMap(issue)
-			if err != nil {
-				return nil, err
-			}
-			if item["pull_request"] == nil {
-				all = append(all, item)
-			}
-		}
+		all = append(all, issues...)
 	}
-	return all, nil
 }
 
-func (s *Service) getIssueSDK(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error) {
-	cli, err := s.ensureSDKClient()
+func (s *Service) GetIssue(owner, repo string, number int64) (*sdk.Issue, error) {
+	cli, err := s.sdkClient()
 	if err != nil {
 		return nil, err
 	}
-
-	issue, _, err := cli.SDK.GetIssue(owner, repo, int64(number))
+	issue, _, err := cli.GetIssue(owner, repo, number)
 	if err != nil {
-		return nil, fmt.Errorf("gitea sdk get issue %s/%s#%d: %w", owner, repo, number, err)
-	}
-	return marshalToMap(issue)
-}
-
-func (s *Service) listOpenIssuesCLI(ctx context.Context, owner, repo string) ([]map[string]interface{}, error) {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues?state=open&limit=50", owner, repo)
-	res, err := s.cliRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	items, ok := res.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected issue list response type: %T", res)
-	}
-
-	filtered := make([]map[string]interface{}, 0, len(items))
-	for _, item := range items {
-		issue, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if issue["pull_request"] == nil {
-			filtered = append(filtered, issue)
-		}
-	}
-	return filtered, nil
-}
-
-func (s *Service) getIssueCLI(ctx context.Context, owner, repo string, number int) (map[string]interface{}, error) {
-	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
-	res, err := s.cliRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	issue, ok := res.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected issue response type: %T", res)
+		return nil, fmt.Errorf("gitea get issue %s/%s#%d: %w", owner, repo, number, err)
 	}
 	return issue, nil
 }
 
-func (s *Service) ensureSDKClient() (*helpers.Client, error) {
-	if s.helperClient != nil {
-		return s.helperClient, nil
-	}
-
-	cfg := helpers.Config{
-		URL:   s.cfg.BaseURL,
-		Token: s.cfg.Token,
-		Owner: s.cfg.Owner,
-	}
-	cli, err := helpers.NewClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	s.helperClient = cli
-	return s.helperClient, nil
-}
-
-func (s *Service) request(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
-	primary := strings.ToLower(strings.TrimSpace(s.cfg.PrimaryTransport))
-	switch primary {
-	case "cli":
-		out, err := s.cliRequest(ctx, method, path, data)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return out, err
-		}
-		return s.httpRequest(ctx, method, path, data)
-	default:
-		out, err := s.httpRequest(ctx, method, path, data)
-		if err == nil || !s.cfg.CLIFallbackEnabled {
-			return out, err
-		}
-		return s.cliRequest(ctx, method, path, data)
-	}
-}
-
-func (s *Service) cliRequest(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
-	if err := s.ensureTeaLogin(ctx); err != nil {
-		return nil, err
-	}
-
-	args := []string{"api", "-l", s.cfg.CLI.Login, "-X", strings.ToUpper(method), path}
-	if data != nil {
-		jsonData, err := json.Marshal(data)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, "-d", string(jsonData))
-	}
-
-	code, out, err := s.runTea(ctx, args, defaultCommandTimout)
-	if err != nil {
-		return nil, err
-	}
-	if code != 0 {
-		return nil, fmt.Errorf("gitea cli api request failed: method=%s path=%s output=%s", method, path, out)
-	}
-	if strings.TrimSpace(out) == "" {
-		return map[string]interface{}{}, nil
-	}
-
-	var result interface{}
-	if err := json.Unmarshal([]byte(out), &result); err != nil {
-		return nil, fmt.Errorf("gitea cli returned non-json output for %s: %s", path, out)
-	}
-	return result, nil
-}
-
-func (s *Service) httpRequest(ctx context.Context, method, path string, data interface{}) (interface{}, error) {
-	if strings.TrimSpace(s.cfg.Token) == "" {
-		return nil, fmt.Errorf("gitea token is required")
-	}
-	fullURL := strings.TrimRight(s.cfg.BaseURL, "/") + path
-
-	var bodyReader io.Reader
-	if data != nil {
-		jsonData, err := json.Marshal(data)
-		if err != nil {
-			return nil, err
-		}
-		bodyReader = bytes.NewBuffer(jsonData)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "token "+s.cfg.Token)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: defaultHTTPTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gitea http request failed %d on %s: %s", resp.StatusCode, path, string(body))
-	}
-
-	var out interface{}
-	err = json.NewDecoder(resp.Body).Decode(&out)
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string]interface{}{}
-	}
-	return out, nil
-}
-
-func (s *Service) ensureTeaLogin(ctx context.Context) error {
-	if s.teaLoginReady {
-		return nil
-	}
-
-	if strings.TrimSpace(s.cfg.CLI.URL) == "" {
-		return fmt.Errorf("gitea cli url is required")
-	}
-	if strings.TrimSpace(s.cfg.CLI.Token) == "" {
-		return fmt.Errorf("gitea cli token is required")
-	}
-
-	if err := os.MkdirAll(s.teaConfigDir, 0755); err != nil {
-		return err
-	}
-
-	code, out, _ := s.runTea(ctx, []string{"login", "list"}, 10*time.Second)
-	if code == 0 && strings.Contains(out, s.cfg.CLI.Login) {
-		s.teaLoginReady = true
-		return nil
-	}
-
-	loginArgs := []string{
-		"login", "add",
-		"--name", s.cfg.CLI.Login,
-		"--url", s.cfg.CLI.URL,
-		"--token", s.cfg.CLI.Token,
-	}
-	code, out, err := s.runTea(ctx, loginArgs, 20*time.Second)
+func (s *Service) UpdateIssueBody(owner, repo string, number int64, body string) error {
+	cli, err := s.sdkClient()
 	if err != nil {
 		return err
 	}
-	if code != 0 {
-		return fmt.Errorf("tea login add failed: %s", out)
+	_, _, err = cli.EditIssue(owner, repo, number, sdk.EditIssueOption{Body: &body})
+	if err != nil {
+		return fmt.Errorf("gitea edit issue %s/%s#%d: %w", owner, repo, number, err)
 	}
-
-	s.teaLoginReady = true
 	return nil
 }
 
-func (s *Service) runTea(parent context.Context, args []string, timeout time.Duration) (int, string, error) {
-	teaBin := "tea"
-	if s.cfg.CLI.Bin != "" {
-		teaBin = s.cfg.CLI.Bin
+func (s *Service) CreateIssueComment(owner, repo string, number int64, body string) (*sdk.Comment, error) {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return nil, err
 	}
-
-	return runCommand(parent, s.rootDir, s.teaConfigDir, timeout, teaBin, args...)
+	comment, _, err := cli.CreateIssueComment(owner, repo, number, sdk.CreateIssueCommentOption{Body: body})
+	if err != nil {
+		return nil, fmt.Errorf("gitea comment issue %s/%s#%d: %w", owner, repo, number, err)
+	}
+	return comment, nil
 }
 
-func runCommand(parent context.Context, cwd, teaConfigDir string, timeout time.Duration, binary string, args ...string) (int, string, error) {
-	if timeout <= 0 {
-		timeout = defaultCommandTimout
-	}
-
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Dir = cwd
-
-	env := os.Environ()
-	if teaConfigDir != "" {
-		env = append(env, "TEA_CONFIG_DIR="+teaConfigDir)
-	}
-	cmd.Env = env
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	out := strings.TrimSpace(stdout.String() + "\n" + stderr.String())
+func (s *Service) EditIssueComment(owner, repo string, commentID int64, body string) error {
+	cli, err := s.sdkClient()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return exitErr.ExitCode(), out, nil
+		return err
+	}
+	_, _, err = cli.EditIssueComment(owner, repo, commentID, sdk.EditIssueCommentOption{Body: body})
+	if err != nil {
+		return fmt.Errorf("gitea edit comment %s/%s id=%d: %w", owner, repo, commentID, err)
+	}
+	return nil
+}
+
+func (s *Service) ListIssueComments(owner, repo string, number int64) ([]*sdk.Comment, error) {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return nil, err
+	}
+	comments, _, err := cli.ListIssueComments(owner, repo, number, sdk.ListIssueCommentOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("gitea list comments %s/%s#%d: %w", owner, repo, number, err)
+	}
+	return comments, nil
+}
+
+func (s *Service) AddIssueLabel(owner, repo string, number int64, label string) error {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return err
+	}
+	id, err := s.labelID(cli, owner, repo, label, true)
+	if err != nil {
+		return err
+	}
+	_, _, err = cli.AddIssueLabels(owner, repo, number, sdk.IssueLabelsOption{Labels: []int64{id}})
+	if err != nil {
+		return fmt.Errorf("gitea add label %q to %s/%s#%d: %w", label, owner, repo, number, err)
+	}
+	return nil
+}
+
+func (s *Service) RemoveIssueLabel(owner, repo string, number int64, label string) error {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return err
+	}
+	id, err := s.labelID(cli, owner, repo, label, false)
+	if err != nil || id == 0 {
+		return err
+	}
+	_, err = cli.DeleteIssueLabel(owner, repo, number, id)
+	if err != nil {
+		return fmt.Errorf("gitea remove label %q from %s/%s#%d: %w", label, owner, repo, number, err)
+	}
+	return nil
+}
+
+// labelID resolves a repo label name to its ID, optionally creating the label.
+// Returns 0 without error when the label does not exist and create is false.
+func (s *Service) labelID(cli *sdk.Client, owner, repo, label string, create bool) (int64, error) {
+	key := owner + "/" + repo + "/" + label
+	s.mu.Lock()
+	if id, ok := s.labelIDs[key]; ok {
+		s.mu.Unlock()
+		return id, nil
+	}
+	s.mu.Unlock()
+
+	labels, _, err := cli.ListRepoLabels(owner, repo, sdk.ListLabelsOptions{ListOptions: sdk.ListOptions{PageSize: 100}})
+	if err != nil {
+		return 0, fmt.Errorf("gitea list labels %s/%s: %w", owner, repo, err)
+	}
+	for _, l := range labels {
+		s.mu.Lock()
+		s.labelIDs[owner+"/"+repo+"/"+l.Name] = l.ID
+		s.mu.Unlock()
+		if l.Name == label {
+			return l.ID, nil
 		}
-		return -1, out, err
 	}
-	return 0, out, nil
+	if !create {
+		return 0, nil
+	}
+	created, _, err := cli.CreateLabel(owner, repo, sdk.CreateLabelOption{Name: label, Color: labelColor(label)})
+	if err != nil {
+		return 0, fmt.Errorf("gitea create label %q in %s/%s: %w", label, owner, repo, err)
+	}
+	s.mu.Lock()
+	s.labelIDs[key] = created.ID
+	s.mu.Unlock()
+	return created.ID, nil
 }
 
-func marshalToMap(v interface{}) (map[string]interface{}, error) {
-	raw, err := json.Marshal(v)
+func labelColor(label string) string {
+	switch {
+	case strings.Contains(label, "failed"), strings.Contains(label, "needs_human"):
+		return "#cc0000"
+	case strings.Contains(label, "completed"), strings.Contains(label, "pr_opened"):
+		return "#00aa00"
+	default:
+		return "#0066cc"
+	}
+}
+
+func (s *Service) CreatePullRequest(owner, repo string, opt sdk.CreatePullRequestOption) (*sdk.PullRequest, error) {
+	cli, err := s.sdkClient()
 	if err != nil {
 		return nil, err
 	}
-	var out map[string]interface{}
-	if err := json.Unmarshal(raw, &out); err != nil && err != io.EOF {
+	pr, _, err := cli.CreatePullRequest(owner, repo, opt)
+	if err != nil {
+		return nil, fmt.Errorf("gitea create PR %s/%s head=%s: %w", owner, repo, opt.Head, err)
+	}
+	return pr, nil
+}
+
+func (s *Service) ListOpenPullRequests(owner, repo string) ([]*sdk.PullRequest, error) {
+	cli, err := s.sdkClient()
+	if err != nil {
 		return nil, err
 	}
-	if out == nil {
-		out = map[string]interface{}{}
+	prs, _, err := cli.ListRepoPullRequests(owner, repo, sdk.ListPullRequestsOptions{
+		State:       sdk.StateOpen,
+		ListOptions: sdk.ListOptions{PageSize: 50},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gitea list PRs %s/%s: %w", owner, repo, err)
 	}
-	return out, nil
+	return prs, nil
+}
+
+func (s *Service) GetPullRequest(owner, repo string, number int64) (*sdk.PullRequest, error) {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return nil, err
+	}
+	pr, _, err := cli.GetPullRequest(owner, repo, number)
+	if err != nil {
+		return nil, fmt.Errorf("gitea get PR %s/%s#%d: %w", owner, repo, number, err)
+	}
+	return pr, nil
 }

@@ -1,89 +1,66 @@
 # Skill: Issue Handler CLI (Go)
 
-The `issue-handler` is a Go service that polls Gitea issues, tracks processing state, and posts workflow comments.
+The `issue-handler` is a Go service that polls Gitea issues, serves webhooks,
+and drives the architect/developer/reviewer agent pipeline.
 
 ## Project Structure
 
-- `cmd/issue-handler/main.go`: Minimal entry point, handles CLI flags and starts the loop.
-- `internal/config/config.go`: Handles configuration loading using reflection-based environment variable mapping.
-- `pkg/fabric/issue_handler.go`: Contains the core logic for Gitea/Telegram interactions and issue processing.
+- `cmd/issue-handler/main.go`: Minimal entry point, handles CLI flags, starts the poll loop and the webhook server on `:8082`.
+- `internal/config/config.go`: Configuration loading using reflection-based environment variable mapping.
+- `pkg/fabric/issue_handler.go`: Core orchestration (architect gate, developer stage, status protocol).
+- `pkg/fabric/webhook_handler.go`: Webhook routing (issues, pull_request, status), CI fixer, reviewer, architect escalation.
+- `pkg/fabric/status.go`: Single editable status comment with hidden YAML state.
+- `pkg/gitea/client.go`: Typed Gitea client built on the official SDK (`code.gitea.io/sdk/gitea`); SDK types are the domain types.
 - `pkg/file/file.go`: Utility functions for file system operations, including root path detection.
 
 ## Usage
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - Gitea instance
-- `tea` CLI (preferred default transport for Gitea operations)
-- Docker (optional, if `tea` is run via container)
+- `agent` (Cursor Agent CLI) authenticated; credentials from `~/.config/cursor/auth.json` are mounted into the container
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITEA_BOT_BASE_URL` | `http://localhost:3000` | Gitea API base URL |
-| `GITEA_BOT_TOKEN` | (required) | Gitea API token |
+| `GITEA_BOT_TOKEN` | (required) | Gitea API token (fallback for all roles) |
 | `GITEA_BOT_OWNER` | `eslider` | Repository owner |
 | `GITEA_BOT_REPO` | `ai-fabric` | Repository name |
-| `GITEA_CLI_ENABLED` | `1` | Use `tea` CLI for API requests (recommended default) |
+| `GITEA_HANDLER_TOKEN` | bot token | Developer role user token (`ai-developer`) |
+| `GITEA_REVIEWER_TOKEN` | bot token | Reviewer role user token (`ai-reviewer`) |
+| `GITEA_ARCHITECT_TOKEN` | bot token | Architect role user token (`ai-architect`) |
+| `GITEA_WEBHOOK_SECRET` | (empty) | HMAC secret for incoming webhooks |
 | `ISSUE_BASE_BRANCH` | `main` | Base branch for worktrees |
 | `ISSUE_POLL_INTERVAL_SEC` | `45` | Polling interval |
+| `ISSUE_IN_PROGRESS_TIMEOUT_SEC` | `3600` | Stale `in_progress` reclaim timeout |
+| `ISSUE_SMART_MODEL` | (auto-detect) | Agent model; default: first non-fast `composer*` model |
 | `ISSUE_HANDLER_DRY_RUN` | `0` | If `1`, do not perform actual changes |
 
 ### Command Line Flags
 
-- `--once`: Run a single polling cycle and exit.
+- `--once`: Run a single polling cycle and exit (webhook server disabled).
 - `--issue-number <int>`: Process only a specific issue number.
 
-## Testing Strategy (TDD)
+## Testing Strategy
 
-The project follows a TDD approach for core logic. Primary tests currently cover configuration and entrypoint behavior in `cmd/issue-handler/main_test.go`.
+No mocks, no isolated unit tests (see `docs/skills/engineering-principles.md`).
 
-### Running Tests
+- API tests: `pkg/fabric/webhook_api_test.go` — real HTTP against the webhook endpoint.
+- Use-case/system tests: `pkg/fabric/system_test.go` (`//go:build system`) — full issue flow against the live local Gitea with a deterministic stub agent process.
 
 ```bash
-go test -v ./cmd/issue-handler/...
+./bin/test.sh          # fast checks
+./bin/system_test.sh   # system suite against live Gitea (loads .env)
 ```
-
-### Key Test Areas
-
-1. **Configuration Loading**: Ensures transport and compatibility env behavior is loaded correctly.
-2. **Transport Selection**: Confirms primary/fallback transport configuration mapping works as expected.
 
 ## Workflow
 
-1. **Polling**: The handler lists open issues from Gitea (or handles a single issue with `--issue-number`).
-2. **State Gate**: It checks local state and skips terminal statuses.
-3. **Retry Gate**: It waits retry interval before reprocessing failed issues.
-4. **Telegram Notify**: It sends start notification when the issue contains Telegram chat marker.
-5. **Issue Comments**: It comments claim/progress updates in Gitea.
-6. **State Persist**: It updates attempts/status and writes `var/issue-handler/state.json`.
-
-## Migration Note
-
-Full parity for architect/developer worktree automation and PR lifecycle is tracked in `docs/workflows/python-to-go-migration.md`.
-
-## Laconic Code Style
-
-When working with `mapstructure` and nested configurations, keep the code laconic. Avoid redundant struct tags when the field name already matches the expected key (after splitting environment variables by underscore).
-
-### Example
-
-**Bad:**
-```go
-type GiteaCLIConfig struct {
-	Bin    string `mapstructure:"BIN"`
-	Image  string `mapstructure:"IMAGE"`
-}
-```
-
-**Good:**
-```go
-type GiteaCLIConfig struct {
-	Bin    string
-	Image  string
-}
-```
-
-Only use `mapstructure` tags when the environment variable name differs significantly from the field name (e.g., `BaseURL string ` + "`" + `mapstructure:"BOT_BASE_URL"` + "`" + `).
+1. **Polling/webhook**: open issues are scanned every cycle; `issues opened` webhooks trigger the architect immediately.
+2. **Loop gates**: terminal labels short-circuit; `status:in_progress` acts as a lock with a staleness timeout; an in-process busy map prevents concurrent runs.
+3. **Architect-first**: until the issue body carries the architect block, only analysis runs.
+4. **Developer**: worktree, agent run (cheap composer model), local checks, commit/push as `ai-developer`, PR with `Closes #N`.
+5. **CI failure**: commit-status webhook routes the failure to the matching PR; fixes are budgeted (2 per SHA, 6 per PR), then the architect escalates and `status:needs_human` stops automation.
+6. **Status**: one editable bot comment with hidden YAML state; labels carry the coarse status; merge sets `status:completed`.

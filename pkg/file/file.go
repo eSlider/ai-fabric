@@ -7,6 +7,7 @@ package file
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,9 +131,7 @@ func ReadDir(dir, ext string) (map[string][]byte, error) {
 				fmt.Printf("failed to read sub directory: %v\n", err)
 				continue
 			}
-			for k, v := range subFiles {
-				filteredFiles[k] = v
-			}
+			maps.Copy(filteredFiles, subFiles)
 			continue
 		}
 
