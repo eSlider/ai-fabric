@@ -385,7 +385,14 @@ func looksLikeMCPToolRequest(text string) bool {
 		return true
 	}
 	parts := strings.SplitN(normalized, " ", 2)
-	return isValidMCPToolName(strings.TrimSpace(parts[0]))
+	toolName := strings.TrimSpace(parts[0])
+	if !isValidMCPToolName(toolName) {
+		return false
+	}
+	if len(parts) == 1 {
+		return true
+	}
+	return strings.HasPrefix(strings.TrimSpace(parts[1]), "{")
 }
 
 func looksLikeTaskRequest(text string) bool {

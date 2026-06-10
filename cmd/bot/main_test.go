@@ -214,6 +214,43 @@ func TestRouteFreeTextTaskRequestCreatesIssue(t *testing.T) {
 	}
 }
 
+func TestRouteFreeTextEnglishTaskRequestCreatesIssue(t *testing.T) {
+	var gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/eslider/ai-fabric/issues" {
+			body, _ := io.ReadAll(r.Body)
+			gotBody = string(body)
+			_, _ = w.Write([]byte(`{"id":1,"number":43,"html_url":"http://example/issues/43"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	cfg := config{
+		GiteaBaseURL: server.URL,
+		GiteaOwner:   "eslider",
+		GiteaRepo:    "ai-fabric",
+		GiteaToken:   "token",
+	}
+	chatID := int64(1001)
+	request := "please fix the bot"
+
+	msg, err := routeFreeTextMessage(cfg, request, chatID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(msg, "#43") || !strings.Contains(msg, "http://example/issues/43") {
+		t.Fatalf("expected issue number and URL in reply, got: %s", msg)
+	}
+	if !strings.Contains(gotBody, request) {
+		t.Fatalf("expected issue body to contain request text, got: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, "<!-- ai-fabric:telegram-chat-id:1001 -->") {
+		t.Fatalf("expected telegram chat id marker in body, got: %s", gotBody)
+	}
+}
+
 func TestRouteFreeTextMCPListRepos(t *testing.T) {
 	mcpServer := newTestMCPServer(t, func(toolName string, _ map[string]any) string {
 		if toolName != "list_my_repos" {
