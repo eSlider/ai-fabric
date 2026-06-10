@@ -2,9 +2,9 @@
 # Critical paths: workflows, infra, scripts, and workflow docs.
 # Default owners for all other changes in this repository.
 
-.gitea/ @eslider
-bin/ @eslider
+/.gitea/ @eslider
+/bin/ @eslider
 docker-compose.yml @eslider
-docs/workflows/ @eslider
-docs/skills/ @eslider
+/docs/workflows/ @eslider
+/docs/skills/ @eslider
 * @eslider

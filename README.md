@@ -65,6 +65,7 @@ sequenceDiagram
 ## Documentation Map
 
 - Project docs index: [`docs/README.md`](docs/README.md)
+- Repository structure: [`docs/architecture/structure.md`](docs/architecture/structure.md)
 - Architecture: [`docs/architecture/ai-fabric-poc.md`](docs/architecture/ai-fabric-poc.md)
 - CI/CD policy: [`docs/workflows/ci-cd.md`](docs/workflows/ci-cd.md)
 - Issue automation flow: [`docs/workflows/issue-handler.md`](docs/workflows/issue-handler.md)
@@ -74,9 +75,4 @@ sequenceDiagram
 
 ## Repository Layout
 
-- `cmd/` application entrypoints
-- `pkg/` reusable domain and system packages
-- `bin/` operational scripts and policy gates
-- `docs/` architecture, workflows, skills, and plans
-- `.gitea/workflows/` CI pipelines
-- `var/` runtime-only state (not source context)
+See [`docs/architecture/structure.md`](docs/architecture/structure.md) for the canonical directory reference (`bin/`, `cmd/`, `internal/`, `pkg/`, `var/`).

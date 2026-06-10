@@ -8,6 +8,7 @@ errors=0
 
 required_paths=(
   "docs/README.md"
+  "docs/architecture/structure.md"
   "docs/architecture/ai-fabric-poc.md"
   "docs/workflows/ci-cd.md"
   "docs/workflows/pr-best-practices.md"

@@ -2,7 +2,7 @@
 
 High-signal documentation for the AI fabric PoC.
 
-- `architecture/` system design and data flows
+- `architecture/` system design, data flows, and [directory structure](architecture/structure.md)
   - `architecture/multi-project-topology.md` growth path to a multi-project agent assistant
 - `workflows/` CI/CD and PR automation rules
   - `workflows/issue-handler.md` roles, triggers, loop prevention, status protocol
