@@ -191,17 +191,26 @@ func TestRouteFreeTextGreetingReturnsHelp(t *testing.T) {
 	}
 }
 
-func TestRouteFreeTextTaskRequestCreatesIssue(t *testing.T) {
+func newTestGiteaIssueServer(t *testing.T, issueResponse string) (*httptest.Server, *string) {
+	t.Helper()
 	var gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/eslider/ai-fabric/issues" {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.22.0"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/eslider/ai-fabric/issues":
 			body, _ := io.ReadAll(r.Body)
 			gotBody = string(body)
-			_, _ = w.Write([]byte(`{"id":1,"number":42,"html_url":"http://example/issues/42"}`))
-			return
+			_, _ = w.Write([]byte(issueResponse))
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
+	return server, &gotBody
+}
+
+func TestRouteFreeTextTaskRequestCreatesIssue(t *testing.T) {
+	server, gotBody := newTestGiteaIssueServer(t, `{"id":1,"number":42,"html_url":"http://example/issues/42"}`)
 	defer server.Close()
 
 	cfg := config{
@@ -220,25 +229,22 @@ func TestRouteFreeTextTaskRequestCreatesIssue(t *testing.T) {
 	if !strings.Contains(msg, "#42") || !strings.Contains(msg, "http://example/issues/42") {
 		t.Fatalf("expected issue number and URL in reply, got: %s", msg)
 	}
-	if !strings.Contains(gotBody, request) {
-		t.Fatalf("expected issue body to contain request text, got: %s", gotBody)
+	var issueReq struct {
+		Body string `json:"body"`
 	}
-	if !strings.Contains(gotBody, "<!-- ai-fabric:telegram-chat-id:999 -->") {
-		t.Fatalf("expected telegram chat id marker in body, got: %s", gotBody)
+	if err := json.Unmarshal([]byte(*gotBody), &issueReq); err != nil {
+		t.Fatalf("expected JSON issue create body, got: %s", *gotBody)
+	}
+	if !strings.Contains(issueReq.Body, request) {
+		t.Fatalf("expected issue body to contain request text, got: %s", issueReq.Body)
+	}
+	if !strings.Contains(issueReq.Body, "<!-- ai-fabric:telegram-chat-id:999 -->") {
+		t.Fatalf("expected telegram chat id marker in body, got: %s", issueReq.Body)
 	}
 }
 
 func TestRouteFreeTextEnglishTaskRequestCreatesIssue(t *testing.T) {
-	var gotBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/eslider/ai-fabric/issues" {
-			body, _ := io.ReadAll(r.Body)
-			gotBody = string(body)
-			_, _ = w.Write([]byte(`{"id":1,"number":43,"html_url":"http://example/issues/43"}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
+	server, gotBody := newTestGiteaIssueServer(t, `{"id":1,"number":43,"html_url":"http://example/issues/43"}`)
 	defer server.Close()
 
 	cfg := config{
@@ -257,11 +263,17 @@ func TestRouteFreeTextEnglishTaskRequestCreatesIssue(t *testing.T) {
 	if !strings.Contains(msg, "#43") || !strings.Contains(msg, "http://example/issues/43") {
 		t.Fatalf("expected issue number and URL in reply, got: %s", msg)
 	}
-	if !strings.Contains(gotBody, request) {
-		t.Fatalf("expected issue body to contain request text, got: %s", gotBody)
+	var issueReq struct {
+		Body string `json:"body"`
 	}
-	if !strings.Contains(gotBody, "<!-- ai-fabric:telegram-chat-id:1001 -->") {
-		t.Fatalf("expected telegram chat id marker in body, got: %s", gotBody)
+	if err := json.Unmarshal([]byte(*gotBody), &issueReq); err != nil {
+		t.Fatalf("expected JSON issue create body, got: %s", *gotBody)
+	}
+	if !strings.Contains(issueReq.Body, request) {
+		t.Fatalf("expected issue body to contain request text, got: %s", issueReq.Body)
+	}
+	if !strings.Contains(issueReq.Body, "<!-- ai-fabric:telegram-chat-id:1001 -->") {
+		t.Fatalf("expected telegram chat id marker in body, got: %s", issueReq.Body)
 	}
 }
 
