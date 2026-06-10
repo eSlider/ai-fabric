@@ -44,3 +44,7 @@ After restore verify:
 - `var/issue-handler/` — no durable state lives there
 - runner registration in `var/runner-1/` — re-registering is cheap; back it up
   only if you want to avoid stale runner entries in the Gitea UI
+
+Changing `GITEA_RUNNER_LABELS` requires removing `var/runner-*/.runner` (or
+recreating the runner volume) before restart so act_runner re-registers with
+the new labels.
