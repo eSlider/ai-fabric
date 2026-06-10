@@ -10,6 +10,17 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+func TestHelpTextMentionsEveryMenuCommand(t *testing.T) {
+	for _, cmd := range []string{
+		"/menu", "/status", "/health", "/projects", "/task",
+		"/checks", "/up", "/down", "/logs", "/help",
+	} {
+		if !strings.Contains(helpText(), cmd) {
+			t.Fatalf("helpText() missing command %s", cmd)
+		}
+	}
+}
+
 func TestSplitCommand(t *testing.T) {
 	cmd, arg := splitCommand("/task implement x")
 	if cmd != "/task" || arg != "implement x" {
