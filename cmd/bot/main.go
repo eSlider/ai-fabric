@@ -15,7 +15,9 @@ import (
 	"time"
 
 	appconfig "example.org/ai-fabric/internal/config"
+	"example.org/ai-fabric/pkg/gitea"
 
+	sdk "code.gitea.io/sdk/gitea"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -50,9 +52,9 @@ func main() {
 			continue
 		}
 		if !strings.HasPrefix(text, "/") {
-			msg, err := routeMCPMessage(cfg, text)
+			msg, err := routeFreeTextMessage(cfg, text, update.Message.Chat.ID)
 			if err != nil {
-				msg = "MCP request failed: " + err.Error() + "\n\nUse: <tool-name> {\"arg\":\"value\"}\nExample: list_my_repos"
+				msg = formatRouteError(err)
 			}
 			_ = reply(bot, update.Message.Chat.ID, trimLen(msg, 3900))
 			continue
@@ -291,50 +293,34 @@ func createTaskIssue(cfg config, description string, chatID int64) (string, erro
 	}
 
 	body := fmt.Sprintf("%s\n\n<!-- ai-fabric:telegram-chat-id:%d -->", description, chatID)
-	payload := map[string]any{
-		"title": "[task] " + trimLen(description, 90),
-		"body":  body,
-	}
-	data, _ := json.Marshal(payload)
+	title := "[task] " + trimLen(description, 90)
+	giteaCfg := giteaBotConfig(cfg)
 
-	u := fmt.Sprintf("%s/api/v1/repos/%s/%s/issues", cfg.GiteaBaseURL, url.PathEscape(cfg.GiteaOwner), url.PathEscape(cfg.GiteaRepo))
-	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
+	issue, err := createIssueWithGitea(giteaCfg, title, body)
 	if err != nil {
 		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
-			u = strings.Replace(u, cfg.GiteaBaseURL, fallbackBaseURL, 1)
-			req, err = http.NewRequest(http.MethodPost, u, bytes.NewReader(data))
-			if err != nil {
-				return "", err
-			}
-			req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-			req.Header.Set("Content-Type", "application/json")
-			resp, err = http.DefaultClient.Do(req)
+			giteaCfg.BaseURL = fallbackBaseURL
+			issue, err = createIssueWithGitea(giteaCfg, title, body)
 		}
 	}
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		bodyRaw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("gitea error: %d %s", resp.StatusCode, string(bodyRaw))
-	}
+	return fmt.Sprintf("Created issue #%d\n%s", issue.Index, issue.HTMLURL), nil
+}
 
-	var issue struct {
-		Number  int    `json:"number"`
-		HTMLURL string `json:"html_url"`
+func giteaBotConfig(cfg config) gitea.BotConfig {
+	return gitea.BotConfig{
+		BaseURL: cfg.GiteaBaseURL,
+		Owner:   cfg.GiteaOwner,
+		Repo:    cfg.GiteaRepo,
+		Token:   cfg.GiteaToken,
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&issue); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Created issue #%d\n%s", issue.Number, issue.HTMLURL), nil
+}
+
+func createIssueWithGitea(cfg gitea.BotConfig, title, body string) (*sdk.Issue, error) {
+	svc := gitea.NewService(cfg)
+	return svc.CreateIssue(cfg.Owner, cfg.Repo, title, body)
 }
 
 func fallbackBaseURLForDNSError(baseURL string, err error) (string, bool) {
@@ -381,6 +367,71 @@ type mcpRPCResponse struct {
 	ID      int64           `json:"id"`
 	Result  json.RawMessage `json:"result"`
 	Error   *mcpRPCError    `json:"error"`
+}
+
+const minTaskRequestLen = 8
+
+var taskRequestKeywords = []string{
+	"сделай", "нужно", "исправь", "добавь", "реализуй", "создай", "почини",
+	"fix", "add", "implement", "create", "need", "please", "should", "make",
+}
+
+func looksLikeMCPToolRequest(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return false
+	}
+	if strings.EqualFold(normalized, "tools") || strings.EqualFold(normalized, "mcp tools") {
+		return true
+	}
+	parts := strings.SplitN(normalized, " ", 2)
+	return isValidMCPToolName(strings.TrimSpace(parts[0]))
+}
+
+func looksLikeTaskRequest(text string) bool {
+	normalized := strings.TrimSpace(text)
+	if len(normalized) < minTaskRequestLen {
+		return false
+	}
+	lower := strings.ToLower(normalized)
+	for _, kw := range taskRequestKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, "?")
+}
+
+func routeFreeTextMessage(cfg config, text string, chatID int64) (string, error) {
+	normalized := strings.TrimSpace(text)
+	if normalized == "" {
+		return freeTextHelpMessage(), nil
+	}
+	if looksLikeMCPToolRequest(normalized) {
+		return routeMCPMessage(cfg, normalized)
+	}
+	if looksLikeTaskRequest(normalized) {
+		return createTaskIssue(cfg, normalized, chatID)
+	}
+	return freeTextHelpMessage(), nil
+}
+
+func formatRouteError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "I can call MCP tools") || strings.Contains(msg, "MCP chat mode supports") {
+		return msg
+	}
+	return "Request failed: " + msg
+}
+
+func freeTextHelpMessage() string {
+	return strings.TrimSpace(`I did not recognize that message.
+
+Send a task in natural language (e.g. "нужно исправить баг") or use:
+- /task <description> — create a Gitea issue
+- /projects — list projects
+- tools — list MCP tools
+- <tool-name> {"arg":"value"} — call an MCP tool`)
 }
 
 func routeMCPMessage(cfg config, text string) (string, error) {
@@ -615,7 +666,8 @@ func helpText() string {
 /logs <service> — show docker compose logs
 /help — show this message
 
-Non-command messages invoke MCP tools. Send "tools" to list available tools, or <tool-name> {"arg":"value"} to call one.`)
+Natural-language task requests (e.g. "нужно исправить баг") also create Gitea issues.
+For MCP tools, send "tools" to list them, or <tool-name> {"arg":"value"} to call one.`)
 }
 
 func mcpUsageMessage(toolName string) string {
