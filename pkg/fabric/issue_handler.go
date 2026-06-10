@@ -87,6 +87,18 @@ func (h *IssueHandler) tryClaim(busy map[int64]bool, number int64) bool {
 	return true
 }
 
+// claimWithRetry retries tryClaim a few times; webhook events can race with a
+// just-finished push that still holds the claim.
+func (h *IssueHandler) claimWithRetry(busy map[int64]bool, number int64, attempts int, delay time.Duration) bool {
+	for range attempts {
+		if h.tryClaim(busy, number) {
+			return true
+		}
+		time.Sleep(delay)
+	}
+	return false
+}
+
 func (h *IssueHandler) release(busy map[int64]bool, number int64) {
 	h.busyMu.Lock()
 	defer h.busyMu.Unlock()

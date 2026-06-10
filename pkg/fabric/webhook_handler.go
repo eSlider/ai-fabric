@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	sdk "code.gitea.io/sdk/gitea"
 )
@@ -350,7 +351,7 @@ from the base branch. Then stage the files and complete the merge commit
 		}
 	}
 
-	if err := h.commitFix(path, localBranch, branch); err != nil {
+	if err := h.commitFix(path, localBranch, branch, "chore: merge base branch and resolve conflicts"); err != nil {
 		fmt.Printf("[sync] Failed to push merge for PR #%d: %v\n", prNum, err)
 		return
 	}
@@ -443,7 +444,7 @@ CI failed on branch %s. Reproduce and fix the failures, then make
 		return
 	}
 
-	if err := h.commitFix(path, localBranch, branch); err != nil {
+	if err := h.commitFix(path, localBranch, branch, "fix(ci): repair failing checks"); err != nil {
 		fmt.Printf("[fixer] Failed to push fix for PR #%d: %v\n", prNum, err)
 		return
 	}
@@ -460,7 +461,7 @@ CI failed on branch %s. Reproduce and fix the failures, then make
 	fmt.Printf("[fixer] Pushed fix for PR #%d\n", prNum)
 }
 
-func (h *IssueHandler) commitFix(path, localBranch, remoteBranch string) error {
+func (h *IssueHandler) commitFix(path, localBranch, remoteBranch, message string) error {
 	status, err := h.runCommand(path, nil, "git", "status", "--porcelain")
 	if err != nil {
 		return err
@@ -469,7 +470,7 @@ func (h *IssueHandler) commitFix(path, localBranch, remoteBranch string) error {
 		if _, err := h.runCommand(path, nil, "git", "add", "."); err != nil {
 			return err
 		}
-		if out, err := h.runCommand(path, h.gitIdentityEnv(), "git", "commit", "-m", "fix(ci): repair failing checks"); err != nil {
+		if out, err := h.runCommand(path, h.gitIdentityEnv(), "git", "commit", "-m", message); err != nil {
 			return fmt.Errorf("commit failed: %s: %w", out, err)
 		}
 	}
@@ -532,9 +533,16 @@ Produce a concise markdown review:
 	}
 }
 
-// ReviewPullRequest posts a single automated review per PR head SHA.
+// ReviewPullRequest posts a single automated review per PR head SHA. On
+// REQUEST_CHANGES the developer addresses the in-scope findings and pushes,
+// which triggers a fresh review of the new head; out-of-scope findings are
+// spun off into a separate issue so the developer is not dragged beyond the
+// task's boundaries.
 func (h *IssueHandler) ReviewPullRequest(owner, repo string, prNum int64) {
-	if !h.tryClaim(h.busyPRs, prNum) {
+	// The PR may still be claimed by the review-fix push that triggered this
+	// review; retry briefly instead of dropping the event.
+	if !h.claimWithRetry(h.busyPRs, prNum, 4, 20*time.Second) {
+		fmt.Printf("[reviewer] PR #%d stayed busy, skipping review\n", prNum)
 		return
 	}
 	defer h.release(h.busyPRs, prNum)
@@ -577,9 +585,20 @@ docs/skills/engineering-principles.md: reject duplication, speculative
 abstractions, mock-based tests, and violations of the 3-tier boundaries.
 Verify the change traces to its issue and reuses existing code where possible.
 
-Output a concise markdown review with:
-- Verdict: APPROVE or REQUEST_CHANGES
-- Findings: bullet list, each with file reference, only real issues
+Scope rule: only findings that block this PR's linked issue belong in scope.
+Real problems visible in the diff but beyond the issue's goal are out of
+scope — they will be filed as a separate issue, do not demand them here.
+REQUEST_CHANGES is justified by in-scope findings only.
+
+Output EXACTLY this markdown structure and nothing else:
+
+Verdict: APPROVE or REQUEST_CHANGES
+
+## In-Scope Findings
+- bullet list with file references, or "- none"
+
+## Out-of-Scope Findings
+- bullet list with file references, or "- none"
 
 ## PR body
 %s
@@ -601,4 +620,130 @@ Output a concise markdown review with:
 	_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
 		s.ReviewedSHAs = append(s.ReviewedSHAs, headSHA)
 	})
+
+	requestChanges, inScope, outScope := parseReview(out)
+	if outScope != "" {
+		h.fileFollowUpIssue(owner, repo, pr, outScope)
+	}
+	if requestChanges && inScope != "" {
+		h.fixReviewFindings(owner, repo, pr, inScope, state.ReviewFixes)
+	}
+}
+
+// parseReview extracts the verdict and the two findings sections from the
+// reviewer's structured output. "none" sections collapse to empty strings.
+func parseReview(out string) (requestChanges bool, inScope, outScope string) {
+	requestChanges = strings.Contains(out, "REQUEST_CHANGES")
+	inScope = reviewSection(out, "## In-Scope Findings")
+	outScope = reviewSection(out, "## Out-of-Scope Findings")
+	return requestChanges, inScope, outScope
+}
+
+func reviewSection(out, header string) string {
+	_, after, ok := strings.Cut(out, header)
+	if !ok {
+		return ""
+	}
+	if idx := strings.Index(after, "\n## "); idx >= 0 {
+		after = after[:idx]
+	}
+	section := strings.TrimSpace(after)
+	if section == "" || strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(section, "-")), "none") {
+		return ""
+	}
+	return section
+}
+
+// fileFollowUpIssue records out-of-scope review findings as a new issue so the
+// regular architect-developer flow handles them in their own bounded context.
+func (h *IssueHandler) fileFollowUpIssue(owner, repo string, pr *sdk.PullRequest, findings string) {
+	title := fmt.Sprintf("[follow-up] Out-of-scope review findings from PR #%d", pr.Index)
+
+	// One follow-up issue per PR: further review rounds extend nothing.
+	if issues, err := h.Reviewer.ListOpenIssues(owner, repo); err == nil {
+		for _, issue := range issues {
+			if issue.Title == title {
+				return
+			}
+		}
+	}
+
+	body := fmt.Sprintf(`The automated review of PR #%d (%s) surfaced real problems that are
+beyond that PR's scope. They are collected here to be handled separately.
+
+## Findings
+%s
+`, pr.Index, pr.Title, findings)
+	issue, err := h.Reviewer.CreateIssue(owner, repo, title, body)
+	if err != nil {
+		fmt.Printf("[reviewer] Failed to file follow-up issue for PR #%d: %v\n", pr.Index, err)
+		return
+	}
+	fmt.Printf("[reviewer] Filed follow-up issue #%d for out-of-scope findings of PR #%d\n", issue.Index, pr.Index)
+}
+
+// fixReviewFindings lets the developer address in-scope review findings on the
+// PR branch, within a bounded number of rounds. The caller must hold the busy
+// claim for the PR. A successful push triggers a fresh review of the new head.
+func (h *IssueHandler) fixReviewFindings(owner, repo string, pr *sdk.PullRequest, findings string, rounds int) {
+	prNum := pr.Index
+	if max := h.Cfg.Issue.Webhook.ReviewFixMaxPerPR; rounds >= max {
+		fmt.Printf("[reviewer] Review-fix budget exhausted for PR #%d (%d rounds), needs human\n", prNum, rounds)
+		_ = h.Developer.AddIssueLabel(owner, repo, prNum, "status:needs_human")
+		_, _ = h.Reviewer.CreateIssueComment(owner, repo, prNum,
+			"## Review loop stopped\n\nThe developer agent could not satisfy the review within the allowed rounds. Human attention required.")
+		_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
+			s.Escalated = true
+		})
+		return
+	}
+
+	fmt.Printf("[reviewer] REQUEST_CHANGES on PR #%d, launching developer (round %d)\n", prNum, rounds+1)
+	branch := pr.Head.Ref
+	localBranch := fmt.Sprintf("fix/pr-%d", prNum)
+	path := h.worktreePath(fmt.Sprintf("pr-%d", prNum))
+	if err := h.ensureWorktree(localBranch, path, "origin/"+branch); err != nil {
+		fmt.Printf("[reviewer] Failed to prepare fix worktree for PR #%d: %v\n", prNum, err)
+		return
+	}
+
+	promptPath := filepath.Join(path, ".issue-agent-prompt.md")
+	prompt := fmt.Sprintf(`# Address review findings on PR #%d
+
+Title: %s
+
+## Task
+The code reviewer requested changes on this PR. Address every finding below
+with minimal, scoped changes. Then run
+./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh and fix any failures. Commit.
+
+## Review findings (all must be addressed)
+%s
+
+## Constraints (inviolable, see docs/skills/engineering-principles.md)
+- Address the findings only; no unrelated changes
+- Reuse existing packages and libraries before writing new code
+- No mock-based or isolated unit tests
+`, prNum, pr.Title, findings)
+	if err := os.WriteFile(promptPath, []byte(prompt), 0644); err != nil {
+		return
+	}
+
+	if out, err := h.runAgent(path, promptPath, h.Developer); err != nil {
+		fmt.Printf("[reviewer] Review-fix agent failed for PR #%d: %v: %s\n", prNum, err, out)
+		return
+	}
+	if out, err := h.runChecks(path); err != nil {
+		fmt.Printf("[reviewer] Checks failing after review fix on PR #%d: %s\n", prNum, out)
+		return
+	}
+	if err := h.commitFix(path, localBranch, branch, "fix(review): address reviewer findings"); err != nil {
+		fmt.Printf("[reviewer] Failed to push review fix for PR #%d: %v\n", prNum, err)
+		return
+	}
+	_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
+		s.ReviewFixes++
+		s.Stage = stageDeveloper
+	})
+	fmt.Printf("[reviewer] Pushed review fix for PR #%d\n", prNum)
 }

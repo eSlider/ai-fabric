@@ -39,10 +39,16 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
    pushed fix consumes budget; failed or no-op attempts do not). When the
    budget is exhausted the architect posts a one-time design review, the PR
    and the linked issue get `status:needs_human`, and automation stops.
-4. Conflicts: the poller detects open PRs that became unmergeable after the
+4. Review loop: the reviewer separates findings into in-scope and
+   out-of-scope. On REQUEST_CHANGES the developer addresses the in-scope
+   findings and pushes (at most `ISSUE_REVIEW_FIX_MAX_PER_PR` rounds, then
+   `status:needs_human`); the new head is reviewed again. Out-of-scope
+   findings are filed once per PR as a separate `[follow-up]` issue that
+   enters the normal architect-developer flow.
+5. Conflicts: the poller detects open PRs that became unmergeable after the
    base moved; the developer agent merges the base into the head, resolves
    conflicts and pushes (which re-runs CI and review).
-5. Merge: the linked issue gets `status:completed`, the architect's "## Tasks"
+6. Merge: the linked issue gets `status:completed`, the architect's "## Tasks"
    checklist in the issue body is ticked, and the issue is closed unless
    another open PR still references it.
 
@@ -82,6 +88,8 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
   `composer*` model from `agent --list-models`, else `auto`)
 - `ISSUE_ARCHITECT_ENABLED` (default `1`), `ISSUE_ARCHITECT_MAX_CHARS` (default `6000`),
   `ISSUE_ARCHITECT_MAX_ATTEMPTS` (default `2`, then `status:needs_human`)
+- `ISSUE_REVIEW_FIX_MAX_PER_PR` (default `3`, developer rounds per PR to
+  satisfy the reviewer before `status:needs_human`)
 - `GITEA_WEBHOOK_SECRET` (HMAC validation of incoming webhooks; required in
   daemon mode — the handler refuses to start without it)
 - `TELEGRAM_BOT_TOKEN` (optional, start notifications)

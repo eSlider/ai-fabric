@@ -35,6 +35,8 @@ type WebhookConfig struct {
 	CIFixMaxPerSHA int
 	// CIFixMaxPerPR limits total developer fix attempts per PR across commits.
 	CIFixMaxPerPR int
+	// ReviewFixMaxPerPR limits developer rounds addressing reviewer REQUEST_CHANGES.
+	ReviewFixMaxPerPR int
 }
 
 type IssueConfig struct {
@@ -207,8 +209,9 @@ func LoadConfig() *Config {
 				MaxAttempts: 2,
 			},
 			Webhook: WebhookConfig{
-				CIFixMaxPerSHA: 2,
-				CIFixMaxPerPR:  6,
+				CIFixMaxPerSHA:    2,
+				CIFixMaxPerPR:     6,
+				ReviewFixMaxPerPR: 3,
 			},
 		},
 	}
@@ -236,6 +239,7 @@ func LoadConfig() *Config {
 	setIntFromEnv(&cfg.Issue.InProgressTimeoutSec, "ISSUE_IN_PROGRESS_TIMEOUT_SEC")
 	setIntFromEnv(&cfg.Issue.AgentTimeoutSec, "ISSUE_AGENT_TIMEOUT_SEC")
 	setIntFromEnv(&cfg.Issue.Architect.MaxAttempts, "ISSUE_ARCHITECT_MAX_ATTEMPTS")
+	setIntFromEnv(&cfg.Issue.Webhook.ReviewFixMaxPerPR, "ISSUE_REVIEW_FIX_MAX_PER_PR")
 
 	if cfg.Issue.Poll.Interval.Sec != nil && *cfg.Issue.Poll.Interval.Sec > 0 {
 		cfg.Issue.IssueBot.PollInterval = *cfg.Issue.Poll.Interval.Sec

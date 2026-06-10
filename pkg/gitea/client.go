@@ -15,6 +15,7 @@ import (
 // Client exposes the Gitea operations used by the fabric, with SDK types as the boundary.
 type Client interface {
 	CurrentUser() (*sdk.User, error)
+	CreateIssue(owner, repo, title, body string) (*sdk.Issue, error)
 	ListOpenIssues(owner, repo string) ([]*sdk.Issue, error)
 	GetIssue(owner, repo string, number int64) (*sdk.Issue, error)
 	UpdateIssueBody(owner, repo string, number int64, body string) error
@@ -77,6 +78,19 @@ func (s *Service) CurrentUser() (*sdk.User, error) {
 	}
 	s.currentUser = user
 	return user, nil
+}
+
+// CreateIssue opens a new issue.
+func (s *Service) CreateIssue(owner, repo, title, body string) (*sdk.Issue, error) {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return nil, err
+	}
+	issue, _, err := cli.CreateIssue(owner, repo, sdk.CreateIssueOption{Title: title, Body: body})
+	if err != nil {
+		return nil, fmt.Errorf("gitea create issue %s/%s: %w", owner, repo, err)
+	}
+	return issue, nil
 }
 
 // ListOpenIssues returns all open non-PR issues.

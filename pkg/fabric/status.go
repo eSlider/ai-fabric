@@ -33,7 +33,9 @@ type workStatus struct {
 	CIFix map[string]int `yaml:"ci_fix,omitempty"`
 	// ReviewedSHAs lists PR head SHAs that already received an automated review.
 	ReviewedSHAs []string `yaml:"reviewed_shas,omitempty"`
-	Escalated    bool     `yaml:"escalated,omitempty"`
+	// ReviewFixes counts developer rounds addressing reviewer REQUEST_CHANGES.
+	ReviewFixes int  `yaml:"review_fixes,omitempty"`
+	Escalated   bool `yaml:"escalated,omitempty"`
 }
 
 func (s *workStatus) totalCIFixes() int {
