@@ -22,6 +22,18 @@ for path in "${required[@]}"; do
   [[ -f "${path}" ]] || { echo "Missing required file: ${path}"; exit 1; }
 done
 
+# CI jobs use runs-on: ubuntu-latest; the Gitea runner must advertise the same label.
+runner_script="${ROOT_DIR}/bin/gitea-runner-command.sh"
+runner_label='ubuntu-latest:docker://gitea/runner-images:ubuntu-latest'
+if ! grep -qF -- "--labels \"${runner_label}\"" "${runner_script}"; then
+  echo "gitea-runner-command.sh must register --labels \"${runner_label}\" for CI runs-on: ubuntu-latest"
+  exit 1
+fi
+if ! grep -qF 's#  labels: \[\]#' "${runner_script}"; then
+  echo "gitea-runner-command.sh must patch runner.labels in generated config for CI runs-on: ubuntu-latest"
+  exit 1
+fi
+
 # Keep Go package discovery scoped to source directories.
 # `var/` contains runtime service data and must stay out of module/package scans.
 if [[ -f "${ROOT_DIR}/go.mod" ]] && command -v go >/dev/null 2>&1; then
