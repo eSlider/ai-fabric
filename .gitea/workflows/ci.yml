@@ -47,7 +47,7 @@ jobs:
       - name: Install release dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git
+          apt-get install -y --no-install-recommends git jq
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,14 +92,14 @@ jobs:
           tag="v${{ steps.version.outputs.version }}"
           auth="Authorization: token ${{ secrets.GITHUB_TOKEN }}"
 
-          release_id="$(curl -fsS -H "${auth}" "${api}/repos/${repo}/releases/tags/${tag}" 2>/dev/null \
-            | sed -n 's/.*"id":[[:space:]]*\([0-9]*\).*/\1/p' | head -1 || true)"
+          release_id="$(curl -sS -H "${auth}" "${api}/repos/${repo}/releases/tags/${tag}" | jq -r '.id // empty')"
           if [ -z "${release_id}" ]; then
             release_id="$(curl -fsS -X POST -H "${auth}" -H 'Content-Type: application/json' \
               -d "{\"tag_name\":\"${tag}\",\"name\":\"${tag}\"}" \
-              "${api}/repos/${repo}/releases" \
-              | sed -n 's/.*"id":[[:space:]]*\([0-9]*\).*/\1/p' | head -1)"
+              "${api}/repos/${repo}/releases" | jq -r '.id')"
           fi
+          echo "release_id=${release_id}"
+          [ -n "${release_id}" ] && [ "${release_id}" != "null" ]
 
           artifact="${{ steps.artifact.outputs.artifact_path }}"
           curl -fsS -X POST -H "${auth}" \
