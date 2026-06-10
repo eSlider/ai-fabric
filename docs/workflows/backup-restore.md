@@ -44,3 +44,16 @@ After restore verify:
 - `var/issue-handler/` — no durable state lives there
 - runner registration in `var/runner-1/` — re-registering is cheap; back it up
   only if you want to avoid stale runner entries in the Gitea UI
+
+## Runner labels
+
+`GITEA_RUNNER_LABELS` (default `ubuntu-latest:docker://gitea/runner-images:ubuntu-latest`)
+must match CI `runs-on: ubuntu-latest`. On container start the runner compares a
+persisted stamp (`.runner-labels` in the runner volume) to the current env value;
+when they differ or the stamp is missing, it clears `.runner`, the persisted config,
+and re-registers automatically.
+
+Changing labels therefore does not require manually deleting `var/runner-1/.runner`
+or the config file—restart `gitea-runner` after updating `.env`. Gitea may still
+list orphan runner rows from the old registration until you remove them in the UI
+(**Site Administration → Actions → Runners**).

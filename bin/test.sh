@@ -24,18 +24,34 @@ done
 
 # CI jobs use runs-on: ubuntu-latest; the Gitea runner must advertise the same label.
 runner_script="${ROOT_DIR}/bin/gitea-runner-command.sh"
-expected_label='ubuntu-latest:docker://gitea/runner-images:ubuntu-latest'
+expected_label=$(sed -n 's/^GITEA_RUNNER_LABELS="${GITEA_RUNNER_LABELS:-\(.*\)}"$/\1/p' "${runner_script}")
+if [[ -z "${expected_label}" ]]; then
+  echo "gitea-runner-command.sh must define GITEA_RUNNER_LABELS default assignment"
+  exit 1
+fi
 default_assignment='GITEA_RUNNER_LABELS="${GITEA_RUNNER_LABELS:-'"${expected_label}"'}"'
 if [[ "$(grep -cF -- "${default_assignment}" "${runner_script}")" -ne 1 ]]; then
   echo "gitea-runner-command.sh must define GITEA_RUNNER_LABELS default exactly once"
   exit 1
 fi
-if [[ "$(grep -cF -- '${GITEA_RUNNER_LABELS}' "${runner_script}")" -lt 2 ]]; then
-  echo "gitea-runner-command.sh must reference \${GITEA_RUNNER_LABELS} in config patch and register --labels"
+if ! grep -qF -- '- \"${GITEA_RUNNER_LABELS}\"#' "${runner_script}"; then
+  echo "gitea-runner-command.sh must patch runner.labels via \${GITEA_RUNNER_LABELS} in generated config"
+  exit 1
+fi
+if ! grep -qF -- '--labels "${GITEA_RUNNER_LABELS}"' "${runner_script}"; then
+  echo "gitea-runner-command.sh must register --labels \"\${GITEA_RUNNER_LABELS}\" for CI runs-on: ubuntu-latest"
   exit 1
 fi
 if [[ "$(grep -cF -- "${expected_label}" "${runner_script}")" -gt 1 ]]; then
   echo "gitea-runner-command.sh must not duplicate the literal runner label string"
+  exit 1
+fi
+if ! grep -qF 'RUNNER_LABELS_STAMP=/tmp/runner/.runner-labels' "${runner_script}"; then
+  echo "gitea-runner-command.sh must define RUNNER_LABELS_STAMP for label-drift detection"
+  exit 1
+fi
+if ! grep -qF 'rm -f /tmp/runner/.runner "${CONFIG_FILE}" "${RUNNER_LABELS_STAMP}"' "${runner_script}"; then
+  echo "gitea-runner-command.sh must reset .runner, config, and stamp on GITEA_RUNNER_LABELS drift"
   exit 1
 fi
 
