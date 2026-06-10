@@ -82,7 +82,8 @@ jobs:
           echo "artifact_path=${artifact_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        # v4 requires the GitHub artifact backend and fails on Gitea ("GHES not supported").
+        uses: actions/upload-artifact@v3
         with:
           name: ai-fabric-v${{ steps.version.outputs.version }}
           path: ${{ steps.artifact.outputs.artifact_path }}
