@@ -2,6 +2,9 @@
 set -eu
 
 mkdir -p /tmp/runner
+# act_runner writes its registration file (.runner) to the working directory;
+# /tmp/runner is volume-mounted so registration survives container recreation.
+cd /tmp/runner
 
 if [ ! -f "${CONFIG_FILE}" ]; then
   act_runner generate-config \

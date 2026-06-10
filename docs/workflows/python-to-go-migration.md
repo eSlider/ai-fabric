@@ -67,7 +67,7 @@ This document defines parity contracts and rollout checks for replacing legacy P
 - Service defaults use:
   - `user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}`
 
-- 
+-
   - `restart: unless-stopped`
   - `network_mode: host`
   - json-file logging with rotation.

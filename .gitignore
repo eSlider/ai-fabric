@@ -1,12 +1,19 @@
 # Runtime and generated state
 var/
 .env
+.gitconfig
+dist/
 
 # Local/editor noise
 .DS_Store
 .idea/
 .vscode/
 .cursor/
+.cache/
+
+# Compiled binaries (built locally, mounted into containers)
+bin/issue-handler
+bin/tg-bot
 
 # Generated agent prompts (ephemeral runtime artifacts)
 .issue-agent-prompt.md

@@ -4,18 +4,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"example.org/ai-fabric/pkg/file"
 	giteadomain "example.org/ai-fabric/pkg/gitea"
 
-	"github.com/mitchellh/mapstructure"
+	"github.com/go-viper/mapstructure/v2"
 	"gopkg.in/yaml.v3"
 )
 
 type ArchitectConfig struct {
 	Enabled  bool
 	MaxChars int
+	// MaxAttempts bounds failed architect runs per issue before needs_human.
+	MaxAttempts int
 }
 
 type IssueBot struct {
@@ -25,14 +28,29 @@ type IssueBot struct {
 	TelegramBotToken string
 }
 
+type WebhookConfig struct {
+	// Secret validates X-Gitea-Signature on incoming webhooks (empty disables validation).
+	Secret string
+	// CIFixMaxPerSHA limits developer fix attempts per PR head commit.
+	CIFixMaxPerSHA int
+	// CIFixMaxPerPR limits total developer fix attempts per PR across commits.
+	CIFixMaxPerPR int
+}
+
 type IssueConfig struct {
 	IssueBot
 	BaseBranch     string
 	AgentBin       string
 	AgentExtraArgs string
+	SmartModel     string
 	DryRun         bool
-	Architect      ArchitectConfig
-	Poll           struct {
+	// InProgressTimeoutSec marks a status:in_progress issue as stale and reclaimable.
+	InProgressTimeoutSec int
+	// AgentTimeoutSec is the hard deadline for a single agent run.
+	AgentTimeoutSec int
+	Architect       ArchitectConfig
+	Webhook         WebhookConfig
+	Poll            struct {
 		Interval struct {
 			Sec *int
 		}
@@ -58,12 +76,10 @@ type BotConfig struct {
 }
 
 type Config struct {
-	RootDir       string
-	StateDir      string
-	StatePath     string
-	ApprovalsPath string
-	TeaConfigDir  string
-	Telegram      struct {
+	RootDir   string
+	StateDir  string
+	StatePath string
+	Telegram  struct {
 		Bot struct {
 			Token string
 		}
@@ -89,7 +105,7 @@ type Config struct {
 }
 
 // ReadConfig from path
-func ReadConfig(path string, env string, pointer interface{}) (err error) {
+func ReadConfig(path string, env string, pointer any) (err error) {
 
 	readFile, err := os.ReadFile(path)
 
@@ -97,7 +113,7 @@ func ReadConfig(path string, env string, pointer interface{}) (err error) {
 		return err
 	}
 
-	var yml map[string]map[string]interface{}
+	var yml map[string]map[string]any
 	err = yaml.Unmarshal(readFile, &yml)
 
 	if yml[env] == nil {
@@ -146,7 +162,7 @@ func LoadBotConfig() BotConfig {
 
 func parseSet(v string) map[string]bool {
 	out := map[string]bool{}
-	for _, part := range strings.Split(v, ",") {
+	for part := range strings.SplitSeq(v, ",") {
 		p := strings.TrimSpace(part)
 		if p != "" {
 			out[p] = true
@@ -174,16 +190,6 @@ func LoadConfig() *Config {
 				Owner:   "eslider",
 				Repo:    "ai-fabric",
 			},
-			UseCLI:             true,
-			PrimaryTransport:   "cli",
-			CLIFallbackEnabled: true,
-			CLI: giteadomain.CLIConfig{
-				Image: "gitea/tea:latest",
-				Login: "ai-fabric",
-				Docker: giteadomain.CLIDockerConfig{
-					Network: "host",
-				},
-			},
 		},
 		Issue: IssueConfig{
 			IssueBot: IssueBot{
@@ -191,11 +197,18 @@ func LoadConfig() *Config {
 				MaxFixAttempts:   3,
 				RetryIntervalSec: 600,
 			},
-			BaseBranch: "main",
-			AgentBin:   "agent",
+			BaseBranch:           "main",
+			AgentBin:             "agent",
+			InProgressTimeoutSec: 3600,
+			AgentTimeoutSec:      1800,
 			Architect: ArchitectConfig{
-				Enabled:  true,
-				MaxChars: 6000,
+				Enabled:     true,
+				MaxChars:    6000,
+				MaxAttempts: 2,
+			},
+			Webhook: WebhookConfig{
+				CIFixMaxPerSHA: 2,
+				CIFixMaxPerPR:  6,
 			},
 		},
 	}
@@ -206,28 +219,28 @@ func LoadConfig() *Config {
 	setStringIfNotEmpty(&cfg.Gitea.Owner, cfg.Gitea.Bot.Owner)
 	setStringIfNotEmpty(&cfg.Gitea.Repo, cfg.Gitea.Bot.Repo)
 	setStringIfNotEmpty(&cfg.Gitea.Token, cfg.Gitea.Bot.Token)
-
-	if cfg.Gitea.CLI.Enabled != nil {
-		cfg.Gitea.UseCLI = *cfg.Gitea.CLI.Enabled
-		if cfg.Gitea.Transport.Primary == "" && cfg.Gitea.Primary.Transport == "" {
-			if cfg.Gitea.UseCLI {
-				cfg.Gitea.PrimaryTransport = "cli"
-			} else {
-				cfg.Gitea.PrimaryTransport = "sdk"
-			}
-		}
+	setStringIfNotEmpty(&cfg.Gitea.HandlerToken, os.Getenv("GITEA_HANDLER_TOKEN"))
+	setStringIfNotEmpty(&cfg.Gitea.ReviewerToken, os.Getenv("GITEA_REVIEWER_TOKEN"))
+	setStringIfNotEmpty(&cfg.Gitea.ArchitectToken, os.Getenv("GITEA_ARCHITECT_TOKEN"))
+	if cfg.Gitea.HandlerToken == "" {
+		cfg.Gitea.HandlerToken = cfg.Gitea.Token
 	}
-	setStringIfNotEmpty(&cfg.Gitea.PrimaryTransport, cfg.Gitea.Transport.Primary)
-	setStringIfNotEmpty(&cfg.Gitea.PrimaryTransport, cfg.Gitea.Primary.Transport)
+	if cfg.Gitea.ReviewerToken == "" {
+		cfg.Gitea.ReviewerToken = cfg.Gitea.Token
+	}
+	if cfg.Gitea.ArchitectToken == "" {
+		cfg.Gitea.ArchitectToken = cfg.Gitea.Token
+	}
 
-	setBoolIfNotNil(&cfg.Gitea.CLIFallbackEnabled, cfg.Gitea.CLI.Fallback.Enabled)
-	setBoolIfNotNil(&cfg.Gitea.CLIFallbackEnabled, cfg.Gitea.Transport.Cli.Fallback)
+	setStringIfNotEmpty(&cfg.Issue.Webhook.Secret, os.Getenv("GITEA_WEBHOOK_SECRET"))
+	setIntFromEnv(&cfg.Issue.InProgressTimeoutSec, "ISSUE_IN_PROGRESS_TIMEOUT_SEC")
+	setIntFromEnv(&cfg.Issue.AgentTimeoutSec, "ISSUE_AGENT_TIMEOUT_SEC")
+	setIntFromEnv(&cfg.Issue.Architect.MaxAttempts, "ISSUE_ARCHITECT_MAX_ATTEMPTS")
+
 	if cfg.Issue.Poll.Interval.Sec != nil && *cfg.Issue.Poll.Interval.Sec > 0 {
 		cfg.Issue.IssueBot.PollInterval = *cfg.Issue.Poll.Interval.Sec
 	}
 	setBoolIfNotNil(&cfg.Issue.DryRun, cfg.Issue.Handler.Dry.Run)
-
-	cfg.Gitea.Normalize()
 
 	// Post-processing
 	stateDir := filepath.Join(cfg.RootDir, "var", "issue-handler")
@@ -237,9 +250,6 @@ func LoadConfig() *Config {
 	_ = os.MkdirAll(stateDir, 0755)
 
 	cfg.StateDir = stateDir
-	cfg.StatePath = filepath.Join(stateDir, "state.json")
-	cfg.ApprovalsPath = filepath.Join(stateDir, "approvals.json")
-	cfg.TeaConfigDir = filepath.Join(stateDir, "tea-config")
 
 	return cfg
 }
@@ -253,5 +263,13 @@ func setStringIfNotEmpty(dst *string, src string) {
 func setBoolIfNotNil(dst *bool, src *bool) {
 	if src != nil {
 		*dst = *src
+	}
+}
+
+func setIntFromEnv(dst *int, key string) {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			*dst = n
+		}
 	}
 }
