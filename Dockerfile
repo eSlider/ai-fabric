@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Multi-stage build for AI Fabric Go binaries.
-FROM golang:1.26.1 AS builder
+FROM golang:1.26 AS builder
 
 # Install git for modules that resolve via VCS.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM debian:bookworm-slim
 
-RUN apt-get update >/dev/null && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates bash git docker.io curl && \
   rm -rf /var/lib/apt/lists/*
 

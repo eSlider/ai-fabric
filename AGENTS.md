@@ -3,9 +3,15 @@
 Primary guidance is in:
 
 - `docs/README.md`
+- `docs/skills/engineering-principles.md` (inviolable rules: reuse-first, Occam/YAGNI, 3-tier, YAML over JSON)
 - `docs/skills/agent-guidelines.md`
 - `docs/workflows/ci-cd.md`
 - `docs/workflows/issue-handler.md`
+
+Testing policy (hard rule):
+
+- No mock-based or isolated unit tests — they camouflage problems.
+- Only use-case tests, API tests (real HTTP), and system tests (`//go:build system`).
 
 Context boundary:
 

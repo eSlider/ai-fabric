@@ -68,6 +68,8 @@ func TestParseMCPToolRequestRejectsChatLikeText(t *testing.T) {
 	}
 }
 
+// API tests against a real HTTP server (no mocks): listProjects exercises the
+// actual Gitea REST endpoints and fallback behavior.
 func TestListProjectsFallsBackFromOrgToUser(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

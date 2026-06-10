@@ -11,6 +11,7 @@ if command -v rg >/dev/null 2>&1; then
   if rg -n "[ \t]+$" . \
     --glob "!var/**" \
     --glob "!.git/**" \
+    --glob "!.cache/**" \
     --glob "!.cursor/**"; then
     trailing_ws_found=1
   fi
@@ -22,12 +23,22 @@ else
   done < <(find . \
     -path './var' -prune -o \
     -path './.git' -prune -o \
+    -path './.cache' -prune -o \
     -path './.cursor' -prune -o \
     -type f -print0)
 fi
 if (( trailing_ws_found )); then
   echo "Formatting error: trailing whitespace detected."
   exit 1
+fi
+
+if command -v gofmt >/dev/null 2>&1; then
+  unformatted="$(gofmt -l cmd pkg internal 2>/dev/null || true)"
+  if [[ -n "${unformatted}" ]]; then
+    echo "Formatting error: gofmt needed for:"
+    echo "${unformatted}"
+    exit 1
+  fi
 fi
 
 echo "fmt check passed."
