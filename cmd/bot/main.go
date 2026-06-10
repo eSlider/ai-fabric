@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +16,6 @@ import (
 	appconfig "example.org/ai-fabric/internal/config"
 	"example.org/ai-fabric/pkg/gitea"
 
-	sdk "code.gitea.io/sdk/gitea"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -174,7 +172,7 @@ func health(cfg config) string {
 	healthURL := cfg.GiteaBaseURL + "/api/healthz"
 	resp, err := http.Get(healthURL)
 	if err != nil {
-		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
+		if fallbackBaseURL, ok := gitea.FallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
 			resp, err = http.Get(strings.Replace(healthURL, cfg.GiteaBaseURL, fallbackBaseURL, 1))
 		}
 	}
@@ -209,18 +207,22 @@ func runComposeLogs(service string) string {
 	return string(out)
 }
 
+func botConfigFrom(cfg config) gitea.BotConfig {
+	return gitea.BotConfig{
+		BaseURL: cfg.GiteaBaseURL,
+		Owner:   cfg.GiteaOwner,
+		Repo:    cfg.GiteaRepo,
+		Token:   cfg.GiteaToken,
+	}
+}
+
 func listProjects(cfg config) (string, error) {
 	if cfg.GiteaBaseURL == "" || cfg.GiteaToken == "" || cfg.GiteaOwner == "" {
 		return "", fmt.Errorf("gitea project variables are not fully configured")
 	}
 
-	repos, err := listProjectsFromEndpoint(cfg, "orgs")
-	if err != nil {
-		// If owner is not an org, Gitea returns 404 GetOrgByName; fallback to user repos.
-		if strings.Contains(strings.ToLower(err.Error()), "gitea error: 404") {
-			repos, err = listProjectsFromEndpoint(cfg, "users")
-		}
-	}
+	svc := gitea.NewService(botConfigFrom(cfg))
+	repos, err := svc.ListOwnerRepos(cfg.GiteaOwner, cfg.ProjectListLimit)
 	if err != nil {
 		return "", err
 	}
@@ -228,60 +230,19 @@ func listProjects(cfg config) (string, error) {
 		return "No projects found.", nil
 	}
 
+	baseURL := strings.TrimRight(svc.BaseURL(), "/")
 	var b strings.Builder
 	b.WriteString("Projects:\n")
 	for _, r := range repos {
 		b.WriteString("- " + r.Name)
-		repoURL := strings.TrimSpace(r.URL)
+		repoURL := strings.TrimSpace(r.HTMLURL)
 		if repoURL == "" {
-			repoURL = fmt.Sprintf("%s/%s/%s", strings.TrimRight(cfg.GiteaBaseURL, "/"), url.PathEscape(cfg.GiteaOwner), url.PathEscape(r.Name))
+			repoURL = fmt.Sprintf("%s/%s/%s", baseURL, url.PathEscape(cfg.GiteaOwner), url.PathEscape(r.Name))
 		}
 		b.WriteString(" - " + repoURL)
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String()), nil
-}
-
-func listProjectsFromEndpoint(cfg config, ownerType string) ([]struct {
-	Name string `json:"name"`
-	URL  string `json:"html_url"`
-}, error) {
-	u := fmt.Sprintf("%s/api/v1/%s/%s/repos?limit=%d", cfg.GiteaBaseURL, ownerType, url.PathEscape(cfg.GiteaOwner), cfg.ProjectListLimit)
-	req, err := http.NewRequest(http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
-			u = strings.Replace(u, cfg.GiteaBaseURL, fallbackBaseURL, 1)
-			req, err = http.NewRequest(http.MethodGet, u, nil)
-			if err != nil {
-				return nil, err
-			}
-			req.Header.Set("Authorization", "token "+cfg.GiteaToken)
-			resp, err = http.DefaultClient.Do(req)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gitea error: %d %s", resp.StatusCode, string(body))
-	}
-
-	var repos []struct {
-		Name string `json:"name"`
-		URL  string `json:"html_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		return nil, err
-	}
-	return repos, nil
 }
 
 func createTaskIssue(cfg config, description string, chatID int64) (string, error) {
@@ -292,62 +253,13 @@ func createTaskIssue(cfg config, description string, chatID int64) (string, erro
 		return "", fmt.Errorf("gitea issue variables are not fully configured")
 	}
 
+	svc := gitea.NewService(botConfigFrom(cfg))
 	body := fmt.Sprintf("%s\n\n<!-- ai-fabric:telegram-chat-id:%d -->", description, chatID)
-	title := "[task] " + trimLen(description, 90)
-	giteaCfg := giteaBotConfig(cfg)
-
-	issue, err := createIssueWithGitea(giteaCfg, title, body)
-	if err != nil {
-		if fallbackBaseURL, ok := fallbackBaseURLForDNSError(cfg.GiteaBaseURL, err); ok {
-			giteaCfg.BaseURL = fallbackBaseURL
-			issue, err = createIssueWithGitea(giteaCfg, title, body)
-		}
-	}
+	issue, err := svc.CreateIssue(cfg.GiteaOwner, cfg.GiteaRepo, "[task] "+trimLen(description, 90), body)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Created issue #%d\n%s", issue.Index, issue.HTMLURL), nil
-}
-
-func giteaBotConfig(cfg config) gitea.BotConfig {
-	return gitea.BotConfig{
-		BaseURL: cfg.GiteaBaseURL,
-		Owner:   cfg.GiteaOwner,
-		Repo:    cfg.GiteaRepo,
-		Token:   cfg.GiteaToken,
-	}
-}
-
-func createIssueWithGitea(cfg gitea.BotConfig, title, body string) (*sdk.Issue, error) {
-	svc := gitea.NewService(cfg)
-	return svc.CreateIssue(cfg.Owner, cfg.Repo, title, body)
-}
-
-func fallbackBaseURLForDNSError(baseURL string, err error) (string, bool) {
-	if err == nil || baseURL == "" {
-		return "", false
-	}
-	base, parseErr := url.Parse(baseURL)
-	if parseErr != nil {
-		return "", false
-	}
-
-	hostname := strings.ToLower(strings.TrimSpace(base.Hostname()))
-	if hostname != "gitea" {
-		return "", false
-	}
-
-	lowerErr := strings.ToLower(err.Error())
-	if !strings.Contains(lowerErr, "lookup "+hostname) || !strings.Contains(lowerErr, "dial tcp") {
-		return "", false
-	}
-
-	if port := base.Port(); port != "" {
-		base.Host = net.JoinHostPort("localhost", port)
-	} else {
-		base.Host = "localhost"
-	}
-	return strings.TrimRight(base.String(), "/"), true
 }
 
 type mcpRPCRequest struct {

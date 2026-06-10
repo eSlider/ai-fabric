@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,45 +69,13 @@ func TestParseMCPToolRequestRejectsChatLikeText(t *testing.T) {
 	}
 }
 
-// API tests against a real HTTP server (no mocks): listProjects exercises the
-// actual Gitea REST endpoints and fallback behavior.
-func TestListProjectsFallsBackFromOrgToUser(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/orgs/eslider/repos":
-			http.Error(w, `{"errors":["user redirect does not exist [name: eslider]"],"message":"GetOrgByName"}`, http.StatusNotFound)
-			return
-		case "/api/v1/users/eslider/repos":
-			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":"http://example/ai-fabric"}]`))
-			return
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	cfg := config{
-		GiteaBaseURL:     server.URL,
-		GiteaOwner:       "eslider",
-		GiteaToken:       "token",
-		ProjectListLimit: 20,
-	}
-
-	msg, err := listProjects(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(msg, "ai-fabric") {
-		t.Fatalf("expected project in response, got: %s", msg)
-	}
-}
-
 func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.22.0"}`))
 		case "/api/v1/orgs/eslider/repos":
 			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":""}]`))
-			return
 		default:
 			http.NotFound(w, r)
 		}
@@ -128,6 +95,39 @@ func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
 	}
 	if !strings.Contains(msg, server.URL+"/eslider/ai-fabric") {
 		t.Fatalf("expected generated repo url, got: %s", msg)
+	}
+}
+
+// API tests against a real HTTP server (no mocks): listProjects exercises the
+// actual Gitea REST endpoints and fallback behavior.
+func TestListProjectsUsesGiteaService(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.22.0"}`))
+		case "/api/v1/orgs/eslider/repos":
+			http.Error(w, `{"message":"GetOrgByName"}`, http.StatusNotFound)
+		case "/api/v1/users/eslider/repos":
+			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":"http://example/ai-fabric"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config{
+		GiteaBaseURL:     server.URL,
+		GiteaOwner:       "eslider",
+		GiteaToken:       "token",
+		ProjectListLimit: 20,
+	}
+
+	msg, err := listProjects(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(msg, "ai-fabric") {
+		t.Fatalf("expected project in response, got: %s", msg)
 	}
 }
 
@@ -156,25 +156,6 @@ func TestIsAllowedDeniesUnauthorizedChat(t *testing.T) {
 	}
 	if isAllowed(cfg, msg) {
 		t.Fatalf("expected denied for unauthorized chat ID and username")
-	}
-}
-
-func TestFallbackBaseURLForDNSError(t *testing.T) {
-	err := errors.New(`Get "http://gitea:3000/api/v1/orgs/eslider/repos?limit=20": dial tcp: lookup gitea on 127.0.0.53:53: server misbehaving`)
-	got, ok := fallbackBaseURLForDNSError("http://gitea:3000", err)
-	if !ok {
-		t.Fatalf("expected fallback to be enabled")
-	}
-	if got != "http://localhost:3000" {
-		t.Fatalf("unexpected fallback base URL: %s", got)
-	}
-}
-
-func TestFallbackBaseURLForDNSErrorSkipsNonGiteaHost(t *testing.T) {
-	err := errors.New(`Get "http://example.com/api/healthz": dial tcp: lookup example.com: no such host`)
-	_, ok := fallbackBaseURLForDNSError("http://example.com", err)
-	if ok {
-		t.Fatalf("expected fallback to be disabled for non-gitea host")
 	}
 }
 

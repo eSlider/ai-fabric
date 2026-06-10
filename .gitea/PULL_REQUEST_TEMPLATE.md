@@ -16,7 +16,10 @@ What can break? Include security/compatibility concerns.
 
 ## Reused
 Existing code, libraries, or SDK types reused instead of reimplementing (engineering-principles §1):
-- e.g. `bin/pr_policy.sh` `requiredSections` loop, Gitea SDK types, in-repo `pkg/` helpers
+
+- `pkg/gitea` — typed Gitea client / service layer
+- `code.gitea.io/sdk/gitea` — official Gitea SDK types and API client
+- `github.com/eslider/go-gitea-helpers` — SDK client construction helpers
 
 ## Rollback
 How to safely rollback if this causes issues?
