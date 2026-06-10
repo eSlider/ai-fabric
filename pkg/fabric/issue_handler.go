@@ -226,7 +226,23 @@ func (h *IssueHandler) RunOnce(targetIssue int) {
 		}
 	}
 
+	h.syncConflictedPRs()
 	h.cleanupWorktrees()
+}
+
+// syncConflictedPRs heals open PRs that became unmergeable after the base
+// branch moved; Gitea sends no webhook for that, so the poller covers it.
+func (h *IssueHandler) syncConflictedPRs() {
+	owner, repo := h.Cfg.Gitea.Owner, h.Cfg.Gitea.Repo
+	prs, err := h.Developer.ListOpenPullRequests(owner, repo)
+	if err != nil {
+		return
+	}
+	for _, pr := range prs {
+		if !pr.Mergeable {
+			h.SyncPullRequest(owner, repo, pr.Index)
+		}
+	}
 }
 
 // worktreeMaxAge is how long an agent worktree may stay untouched before it is
@@ -734,6 +750,7 @@ Title: %s
 ## Task
 Implement the issue end-to-end in this repository:
 - follow the Solution Architect section in the issue body; it defines the structure to implement
+- complete every item of the architect's "## Tasks" checklist; list the completed tasks in your final summary
 - write or update use-case level tests first where applicable
 - implement minimal safe changes
 - run ./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh
@@ -792,6 +809,11 @@ Produce a concise markdown analysis with this exact structure:
 ## Implementation Structure
 - Packages/files the developer must touch and the boundaries to respect
 - Existing code, libraries and SDK types to reuse (reuse-first is mandatory)
+
+## Tasks
+- [ ] concrete, verifiable implementation steps as a markdown checklist
+- [ ] each task small enough to confirm done by looking at the diff
+(this checklist is the work breakdown; the developer must complete every item)
 
 ## Estimation
 - Complexity: (S|M|L)

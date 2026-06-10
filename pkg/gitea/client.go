@@ -26,6 +26,8 @@ type Client interface {
 	CreatePullRequest(owner, repo string, opt sdk.CreatePullRequestOption) (*sdk.PullRequest, error)
 	ListOpenPullRequests(owner, repo string) ([]*sdk.PullRequest, error)
 	GetPullRequest(owner, repo string, number int64) (*sdk.PullRequest, error)
+	MergePullRequest(owner, repo string, number int64) error
+	CloseIssue(owner, repo string, number int64) error
 }
 
 // Service implements Client on top of the official Gitea SDK.
@@ -277,4 +279,36 @@ func (s *Service) GetPullRequest(owner, repo string, number int64) (*sdk.PullReq
 		return nil, fmt.Errorf("gitea get PR %s/%s#%d: %w", owner, repo, number, err)
 	}
 	return pr, nil
+}
+
+// MergePullRequest merges an open PR with the default merge style.
+func (s *Service) MergePullRequest(owner, repo string, number int64) error {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return err
+	}
+	merged, _, err := cli.MergePullRequest(owner, repo, number, sdk.MergePullRequestOption{
+		Style: sdk.MergeStyleMerge,
+	})
+	if err != nil {
+		return fmt.Errorf("gitea merge PR %s/%s#%d: %w", owner, repo, number, err)
+	}
+	if !merged {
+		return fmt.Errorf("gitea merge PR %s/%s#%d: not merged", owner, repo, number)
+	}
+	return nil
+}
+
+// CloseIssue closes an issue.
+func (s *Service) CloseIssue(owner, repo string, number int64) error {
+	cli, err := s.sdkClient()
+	if err != nil {
+		return err
+	}
+	closed := sdk.StateClosed
+	_, _, err = cli.EditIssue(owner, repo, number, sdk.EditIssueOption{State: &closed})
+	if err != nil {
+		return fmt.Errorf("gitea close issue %s/%s#%d: %w", owner, repo, number, err)
+	}
+	return nil
 }

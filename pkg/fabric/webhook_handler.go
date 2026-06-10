@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -193,7 +194,8 @@ func (h *IssueHandler) handlePullRequestWebhook(payload giteaWebhookPayload) {
 }
 
 // markLinkedIssueCompleted closes the loop after a merge: the issue linked via
-// "Closes #N" gets the terminal completed status.
+// "Closes #N" gets the terminal completed status, its architect task checklist
+// is ticked, and the issue is closed unless another open PR still references it.
 func (h *IssueHandler) markLinkedIssueCompleted(owner, repo, prBody string) {
 	match := closesIssueRegex.FindStringSubmatch(prBody)
 	if len(match) < 2 {
@@ -208,6 +210,48 @@ func (h *IssueHandler) markLinkedIssueCompleted(owner, repo, prBody string) {
 	_ = upsertStatus(h.Developer, owner, repo, num, func(s *workStatus) {
 		s.Stage = stageCompleted
 	})
+
+	if h.issueReferencedByOpenPR(owner, repo, num) {
+		fmt.Printf("[webhook] Issue #%d still referenced by another open PR, leaving open\n", num)
+		return
+	}
+	h.completeIssueTasks(owner, repo, num)
+	if err := h.Developer.CloseIssue(owner, repo, num); err != nil {
+		fmt.Printf("[webhook] Failed to close issue #%d: %v\n", num, err)
+	}
+}
+
+// issueReferencedByOpenPR reports whether any open PR still closes this issue.
+func (h *IssueHandler) issueReferencedByOpenPR(owner, repo string, num int64) bool {
+	prs, err := h.Developer.ListOpenPullRequests(owner, repo)
+	if err != nil {
+		return false
+	}
+	ref := fmt.Sprintf("Closes #%d", num)
+	return slices.ContainsFunc(prs, func(pr *sdk.PullRequest) bool {
+		return strings.Contains(pr.Body, ref)
+	})
+}
+
+// completeIssueTasks ticks the architect's task checklist in the issue body
+// once the implementing PR has merged with green checks.
+func (h *IssueHandler) completeIssueTasks(owner, repo string, num int64) {
+	issue, err := h.Developer.GetIssue(owner, repo, num)
+	if err != nil {
+		return
+	}
+	start := strings.Index(issue.Body, ArchStart)
+	end := strings.Index(issue.Body, ArchEnd)
+	if start < 0 || end < 0 || end < start {
+		return
+	}
+	block := issue.Body[start:end]
+	ticked := strings.ReplaceAll(block, "- [ ]", "- [x]")
+	if ticked == block {
+		return
+	}
+	newBody := issue.Body[:start] + ticked + issue.Body[end:]
+	_ = h.Developer.UpdateIssueBody(owner, repo, num, newBody)
 }
 
 // handleCommitStatusWebhook reacts to CI failures reported as commit statuses
@@ -237,6 +281,80 @@ func (h *IssueHandler) handleCommitStatusWebhook(payload giteaWebhookPayload) {
 		return
 	}
 	fmt.Printf("[webhook] No open PR found for failed sha %s, ignoring\n", payload.SHA)
+}
+
+// SyncPullRequest heals a PR that conflicts with its base branch: the base is
+// merged into the head, conflicts are resolved by the developer agent, checks
+// are verified and the result is pushed (which re-triggers CI and review).
+func (h *IssueHandler) SyncPullRequest(owner, repo string, prNum int64) {
+	if !h.tryClaim(h.busyPRs, prNum) {
+		return
+	}
+	defer h.release(h.busyPRs, prNum)
+
+	pr, err := h.Developer.GetPullRequest(owner, repo, prNum)
+	if err != nil || pr.State != "open" || pr.Head == nil || pr.Mergeable {
+		return
+	}
+	if loadStatus(h.Developer, owner, repo, prNum).Escalated {
+		return
+	}
+	fmt.Printf("[sync] PR #%d conflicts with %s. Merging base and resolving...\n", prNum, pr.Base.Ref)
+
+	branch := pr.Head.Ref
+	localBranch := fmt.Sprintf("sync/pr-%d", prNum)
+	path := h.worktreePath(fmt.Sprintf("pr-%d", prNum))
+	if err := h.ensureWorktree(localBranch, path, "origin/"+branch); err != nil {
+		fmt.Printf("[sync] Failed to prepare worktree for PR #%d: %v\n", prNum, err)
+		return
+	}
+
+	if out, err := h.runCommand(path, h.gitIdentityEnv(), "git", "merge", "--no-edit", "origin/"+pr.Base.Ref); err != nil {
+		conflicts, _ := h.runCommand(path, nil, "git", "diff", "--name-only", "--diff-filter=U")
+		fmt.Printf("[sync] Merge conflicts on PR #%d:\n%s\n", prNum, conflicts)
+
+		promptPath := filepath.Join(path, ".issue-agent-prompt.md")
+		prompt := fmt.Sprintf(`# Resolve merge conflicts for PR #%d
+
+Title: %s
+
+## Task
+A merge of origin/%s into this branch is in progress and stopped on conflicts.
+Resolve every conflict, preserving both the intent of this PR and the changes
+from the base branch. Then stage the files and complete the merge commit
+(git add <files> && git commit --no-edit). Finally run
+./bin/fmt.sh && ./bin/lint.sh && ./bin/test.sh and fix any failures.
+
+## Conflicted files
+%s
+
+## Merge output
+%s
+
+## Constraints (inviolable, see docs/skills/engineering-principles.md)
+- Resolve conflicts only; no unrelated changes
+- Never discard base branch changes to make conflicts disappear
+`, prNum, pr.Title, pr.Base.Ref, conflicts, out)
+		if err := os.WriteFile(promptPath, []byte(prompt), 0644); err != nil {
+			return
+		}
+		if out, err := h.runAgent(path, promptPath, h.Developer); err != nil {
+			fmt.Printf("[sync] Conflict agent failed for PR #%d: %v: %s\n", prNum, err, out)
+			_, _ = h.runCommand(path, nil, "git", "merge", "--abort")
+			return
+		}
+		if unresolved, _ := h.runCommand(path, nil, "git", "diff", "--name-only", "--diff-filter=U"); unresolved != "" {
+			fmt.Printf("[sync] PR #%d still has unresolved conflicts, aborting:\n%s\n", prNum, unresolved)
+			_, _ = h.runCommand(path, nil, "git", "merge", "--abort")
+			return
+		}
+	}
+
+	if err := h.commitFix(path, localBranch, branch); err != nil {
+		fmt.Printf("[sync] Failed to push merge for PR #%d: %v\n", prNum, err)
+		return
+	}
+	fmt.Printf("[sync] Pushed base merge for PR #%d\n", prNum)
 }
 
 // FixPullRequest lets the developer agent fix a CI failure on a PR, within a

@@ -18,7 +18,8 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
 
 ## Triggers
 
-1. Polling: every `ISSUE_POLL_INTERVAL_SEC` (default 45s) all open issues are scanned.
+1. Polling: every `ISSUE_POLL_INTERVAL_SEC` (default 45s) all open issues are
+   scanned and conflicted open PRs are healed.
 2. Webhooks on `:8082` (`/webhook`, HMAC-validated with `GITEA_WEBHOOK_SECRET`):
    - `issues` (opened) — architect analysis starts immediately.
    - `pull_request` (opened/synchronized) — automated review; (closed+merged) — linked issue gets `status:completed`.
@@ -38,7 +39,12 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
    pushed fix consumes budget; failed or no-op attempts do not). When the
    budget is exhausted the architect posts a one-time design review, the PR
    and the linked issue get `status:needs_human`, and automation stops.
-4. Merge: linked issue is labeled `status:completed`.
+4. Conflicts: the poller detects open PRs that became unmergeable after the
+   base moved; the developer agent merges the base into the head, resolves
+   conflicts and pushes (which re-runs CI and review).
+5. Merge: the linked issue gets `status:completed`, the architect's "## Tasks"
+   checklist in the issue body is ticked, and the issue is closed unless
+   another open PR still references it.
 
 ## Loop prevention
 
