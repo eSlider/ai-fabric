@@ -81,9 +81,29 @@ jobs:
           artifact_path="$(bash ./bin/build_artifact.sh --version "${{ steps.version.outputs.version }}")"
           echo "artifact_path=${artifact_path}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload release artifact
-        # v4 requires the GitHub artifact backend and fails on Gitea ("GHES not supported").
-        uses: actions/upload-artifact@v3
-        with:
-          name: ai-fabric-v${{ steps.version.outputs.version }}
-          path: ${{ steps.artifact.outputs.artifact_path }}
+      # The artifact-service path is unreliable here (job containers cannot
+      # reach the public ROOT_URL); publish a proper Gitea release instead.
+      - name: Publish Gitea release with artifact
+        run: |
+          # Job containers run on the compose network: reach Gitea by service
+          # name, not by the public ROOT_URL (localhost is the container itself).
+          api="http://gitea:3000/api/v1"
+          repo="${GITHUB_REPOSITORY}"
+          tag="v${{ steps.version.outputs.version }}"
+          auth="Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+
+          release_id="$(curl -fsS -H "${auth}" "${api}/repos/${repo}/releases/tags/${tag}" 2>/dev/null \
+            | sed -n 's/.*"id":[[:space:]]*\([0-9]*\).*/\1/p' | head -1 || true)"
+          if [ -z "${release_id}" ]; then
+            release_id="$(curl -fsS -X POST -H "${auth}" -H 'Content-Type: application/json' \
+              -d "{\"tag_name\":\"${tag}\",\"name\":\"${tag}\"}" \
+              "${api}/repos/${repo}/releases" \
+              | sed -n 's/.*"id":[[:space:]]*\([0-9]*\).*/\1/p' | head -1)"
+          fi
+
+          artifact="${{ steps.artifact.outputs.artifact_path }}"
+          curl -fsS -X POST -H "${auth}" \
+            -F "attachment=@${artifact}" \
+            "${api}/repos/${repo}/releases/${release_id}/assets?name=$(basename "${artifact}")" \
+            >/dev/null
+          echo "Release ${tag} published with $(basename "${artifact}")"
