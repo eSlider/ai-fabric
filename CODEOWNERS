@@ -1,0 +1,7 @@
+# Default review ownership. See docs/workflows/pr-best-practices.md.
+* @eslider
+
+/.gitea/ @eslider
+/bin/ @eslider
+docker-compose.yml @eslider
+/docs/workflows/ @eslider

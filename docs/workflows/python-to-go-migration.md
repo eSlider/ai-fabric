@@ -66,8 +66,6 @@ This document defines parity contracts and rollout checks for replacing legacy P
 - Compose watch is enabled for both services with rebuild on repository changes.
 - Service defaults use:
   - `user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}`
-
-- 
   - `restart: unless-stopped`
   - `network_mode: host`
   - json-file logging with rotation.
