@@ -7,6 +7,7 @@ required=(
   "${ROOT_DIR}/README.md"
   "${ROOT_DIR}/docker-compose.yml"
   "${ROOT_DIR}/docs/README.md"
+  "${ROOT_DIR}/docs/architecture/structure.md"
   "${ROOT_DIR}/docs/workflows/pr-best-practices.md"
   "${ROOT_DIR}/docs/workflows/issue-handler.md"
   "${ROOT_DIR}/docs/skills/solution-architect.md"

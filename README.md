@@ -65,8 +65,8 @@ sequenceDiagram
 ## Documentation Map
 
 - Project docs index: [`docs/README.md`](docs/README.md)
+- Repository structure: [`docs/architecture/structure.md`](docs/architecture/structure.md)
 - Architecture: [`docs/architecture/ai-fabric-poc.md`](docs/architecture/ai-fabric-poc.md)
-- Directory structure: [`docs/architecture/structure.md`](docs/architecture/structure.md)
 - CI/CD policy: [`docs/workflows/ci-cd.md`](docs/workflows/ci-cd.md)
 - Issue automation flow: [`docs/workflows/issue-handler.md`](docs/workflows/issue-handler.md)
 - Python to Go migration runbook: [`docs/workflows/python-to-go-migration.md`](docs/workflows/python-to-go-migration.md)
