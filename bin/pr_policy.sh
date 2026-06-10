@@ -144,6 +144,7 @@ func main() {
 		"## Solution",
 		"## Risks",
 		"## Test Plan",
+		"## Reused",
 		"## Rollback",
 		"## Issue Link",
 		"## AI Notes",

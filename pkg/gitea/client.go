@@ -89,9 +89,9 @@ func isNotFoundHTTP(resp *sdk.Response, err error) bool {
 	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		return true
 	}
-	if err != nil {
+	if resp == nil && err != nil {
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "404") || strings.Contains(msg, "not found") {
+		if strings.Contains(msg, "404") {
 			return true
 		}
 	}

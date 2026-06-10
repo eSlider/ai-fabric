@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 )
 
@@ -73,13 +72,8 @@ func TestListOwnerReposGeneratesURLWhenHTMLURLMissing(t *testing.T) {
 	if len(repos) != 1 {
 		t.Fatalf("expected one repo, got %#v", repos)
 	}
-	repoURL := strings.TrimSpace(repos[0].HTMLURL)
-	if repoURL == "" {
-		repoURL = strings.TrimRight(svc.BaseURL(), "/") + "/eslider/ai-fabric"
-	}
-	expected := strings.TrimRight(server.URL, "/") + "/eslider/ai-fabric"
-	if repoURL != expected {
-		t.Fatalf("expected generated repo url %q, got %q", expected, repoURL)
+	if repos[0].HTMLURL != "" {
+		t.Fatalf("expected empty HTMLURL from SDK, got %q", repos[0].HTMLURL)
 	}
 }
 

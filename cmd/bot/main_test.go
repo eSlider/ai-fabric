@@ -67,6 +67,35 @@ func TestParseMCPToolRequestRejectsChatLikeText(t *testing.T) {
 	}
 }
 
+func TestListProjectsGeneratesURLWhenHTMLURLMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/version":
+			_, _ = w.Write([]byte(`{"version":"1.22.0"}`))
+		case "/api/v1/orgs/eslider/repos":
+			_, _ = w.Write([]byte(`[{"name":"ai-fabric","html_url":""}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config{
+		GiteaBaseURL:     server.URL,
+		GiteaOwner:       "eslider",
+		GiteaToken:       "token",
+		ProjectListLimit: 20,
+	}
+
+	msg, err := listProjects(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(msg, server.URL+"/eslider/ai-fabric") {
+		t.Fatalf("expected generated repo url, got: %s", msg)
+	}
+}
+
 func TestListProjectsUsesGiteaService(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
