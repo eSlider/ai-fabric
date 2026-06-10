@@ -5,9 +5,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
+	sdk "code.gitea.io/sdk/gitea"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -191,70 +193,68 @@ func newTestGiteaIssueServer(t *testing.T, issueResponse string) (*httptest.Serv
 }
 
 func TestRouteFreeTextTaskRequestCreatesIssue(t *testing.T) {
-	server, gotBody := newTestGiteaIssueServer(t, `{"id":1,"number":42,"html_url":"http://example/issues/42"}`)
-	defer server.Close()
+	cases := []struct {
+		name          string
+		request       string
+		chatID        int64
+		issueResponse string
+		issueNumber   int
+		issueURL      string
+	}{
+		{
+			name:          "russian",
+			request:       "нужно исправить ошибку в телеграм боте",
+			chatID:        999,
+			issueResponse: `{"id":1,"number":42,"html_url":"http://example/issues/42"}`,
+			issueNumber:   42,
+			issueURL:      "http://example/issues/42",
+		},
+		{
+			name:          "english",
+			request:       "please fix the bot",
+			chatID:        1001,
+			issueResponse: `{"id":1,"number":43,"html_url":"http://example/issues/43"}`,
+			issueNumber:   43,
+			issueURL:      "http://example/issues/43",
+		},
+	}
 
-	cfg := config{
-		GiteaBaseURL: server.URL,
-		GiteaOwner:   "eslider",
-		GiteaRepo:    "ai-fabric",
-		GiteaToken:   "token",
-	}
-	chatID := int64(999)
-	request := "нужно исправить ошибку в телеграм боте"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, gotBody := newTestGiteaIssueServer(t, tc.issueResponse)
+			defer server.Close()
 
-	msg, err := routeFreeTextMessage(cfg, request, chatID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(msg, "#42") || !strings.Contains(msg, "http://example/issues/42") {
-		t.Fatalf("expected issue number and URL in reply, got: %s", msg)
-	}
-	var issueReq struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal([]byte(*gotBody), &issueReq); err != nil {
-		t.Fatalf("expected JSON issue create body, got: %s", *gotBody)
-	}
-	if !strings.Contains(issueReq.Body, request) {
-		t.Fatalf("expected issue body to contain request text, got: %s", issueReq.Body)
-	}
-	if !strings.Contains(issueReq.Body, "<!-- ai-fabric:telegram-chat-id:999 -->") {
-		t.Fatalf("expected telegram chat id marker in body, got: %s", issueReq.Body)
-	}
-}
+			cfg := config{
+				GiteaBaseURL: server.URL,
+				GiteaOwner:   "eslider",
+				GiteaRepo:    "ai-fabric",
+				GiteaToken:   "token",
+			}
 
-func TestRouteFreeTextEnglishTaskRequestCreatesIssue(t *testing.T) {
-	server, gotBody := newTestGiteaIssueServer(t, `{"id":1,"number":43,"html_url":"http://example/issues/43"}`)
-	defer server.Close()
-
-	cfg := config{
-		GiteaBaseURL: server.URL,
-		GiteaOwner:   "eslider",
-		GiteaRepo:    "ai-fabric",
-		GiteaToken:   "token",
-	}
-	chatID := int64(1001)
-	request := "please fix the bot"
-
-	msg, err := routeFreeTextMessage(cfg, request, chatID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(msg, "#43") || !strings.Contains(msg, "http://example/issues/43") {
-		t.Fatalf("expected issue number and URL in reply, got: %s", msg)
-	}
-	var issueReq struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal([]byte(*gotBody), &issueReq); err != nil {
-		t.Fatalf("expected JSON issue create body, got: %s", *gotBody)
-	}
-	if !strings.Contains(issueReq.Body, request) {
-		t.Fatalf("expected issue body to contain request text, got: %s", issueReq.Body)
-	}
-	if !strings.Contains(issueReq.Body, "<!-- ai-fabric:telegram-chat-id:1001 -->") {
-		t.Fatalf("expected telegram chat id marker in body, got: %s", issueReq.Body)
+			msg, err := routeFreeTextMessage(cfg, tc.request, tc.chatID)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			wantIssueRef := "#" + strconv.Itoa(tc.issueNumber)
+			if !strings.Contains(msg, wantIssueRef) || !strings.Contains(msg, tc.issueURL) {
+				t.Fatalf("expected issue number and URL in reply, got: %s", msg)
+			}
+			var issueReq sdk.CreateIssueOption
+			if err := json.Unmarshal([]byte(*gotBody), &issueReq); err != nil {
+				t.Fatalf("expected JSON issue create body, got: %s", *gotBody)
+			}
+			if !strings.Contains(issueReq.Body, tc.request) {
+				t.Fatalf("expected issue body to contain request text, got: %s", issueReq.Body)
+			}
+			wantMarker := "<!-- ai-fabric:telegram-chat-id:" + strconv.FormatInt(tc.chatID, 10) + " -->"
+			if !strings.Contains(issueReq.Body, wantMarker) {
+				t.Fatalf("expected telegram chat id marker in body, got: %s", issueReq.Body)
+			}
+			wantTitle := "[task] " + trimLen(tc.request, 90)
+			if issueReq.Title != wantTitle {
+				t.Fatalf("expected title %q, got: %q", wantTitle, issueReq.Title)
+			}
+		})
 	}
 }
 
