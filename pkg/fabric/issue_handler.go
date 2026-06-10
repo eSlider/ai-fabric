@@ -707,6 +707,13 @@ func (h *IssueHandler) createPR(issue *sdk.Issue, branch, issueType string, skil
 		skillLines = append(skillLines, fmt.Sprintf("  - `%s`", s))
 	}
 
+	reusedSection := strings.Join([]string{
+		"Existing code, libraries, or SDK types reused instead of reimplementing (engineering-principles §1):",
+		"- `pkg/gitea` client and `code.gitea.io/sdk/gitea` types",
+		"- `pkg/fabric` issue handler workflow and check scripts (`bin/fmt.sh`, `bin/lint.sh`, `bin/test.sh`)",
+		"- Repository skills/docs listed in ## AI Notes",
+	}, "\n")
+
 	body := fmt.Sprintf(`## Problem
 Automated implementation for issue #%d: %s
 
@@ -722,6 +729,9 @@ Agent-based implementation using branch %s with scoped changes.
 - [x] ./bin/lint.sh
 - [x] ./bin/test.sh
 
+## Reused
+%s
+
 ## Rollback
 Revert branch %s merge commit if needed.
 
@@ -733,7 +743,7 @@ Closes #%d
 - Automated by issue handler.
 - Skills/docs considered:
 %s
-`, issue.Index, issue.Title, branch, branch, issue.Index, issueType, strings.Join(skillLines, "\n"))
+`, issue.Index, issue.Title, branch, reusedSection, branch, issue.Index, issueType, strings.Join(skillLines, "\n"))
 
 	pr, err := h.Developer.CreatePullRequest(owner, repo, sdk.CreatePullRequestOption{
 		Title: fmt.Sprintf("[agent] %s", issue.Title),
