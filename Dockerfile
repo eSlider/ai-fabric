@@ -25,8 +25,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM debian:bookworm-slim
 
 RUN apt-get update >/dev/null && apt-get install -y --no-install-recommends \
-  ca-certificates bash git docker.io && \
+  ca-certificates bash git docker.io curl && \
   rm -rf /var/lib/apt/lists/*
+
+# Note: The 'agent' binary (Cursor Agent) must be available in the PATH at runtime.
+# If it's not installed via a package manager, it should be copied to /usr/local/bin/agent
+# or mounted as a volume.
 
 WORKDIR /workspace
 
