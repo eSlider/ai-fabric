@@ -34,7 +34,8 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
    cheapest non-fast composer model, local checks
    (`fmt.sh && lint.sh && test.sh`), commit, push, PR with `Closes #N`.
 3. CI failure on the PR: developer fixer reproduces the failure locally and
-   pushes a fix — at most `2` attempts per head SHA, `6` per PR. When the
+   pushes a fix — at most `2` pushed fixes per head SHA, `6` per PR (only a
+   pushed fix consumes budget; failed or no-op attempts do not). When the
    budget is exhausted the architect posts a one-time design review, the PR
    and the linked issue get `status:needs_human`, and automation stops.
 4. Merge: linked issue is labeled `status:completed`.
@@ -69,11 +70,14 @@ All tokens fall back to `GITEA_BOT_TOKEN` when empty.
 - `ISSUE_MAX_FIX_ATTEMPTS` (default `3`, local check-fix loop per run)
 - `ISSUE_RETRY_INTERVAL_SEC` (default `600`, cooldown for `status:failed`)
 - `ISSUE_IN_PROGRESS_TIMEOUT_SEC` (default `3600`, stale claim reclaim)
+- `ISSUE_AGENT_TIMEOUT_SEC` (default `1800`, hard deadline per agent run)
 - `ISSUE_HANDLER_DRY_RUN` (`1` for safe dry-run)
 - `ISSUE_SMART_MODEL` (explicit agent model; default: first non-fast
   `composer*` model from `agent --list-models`, else `auto`)
-- `ISSUE_ARCHITECT_ENABLED` (default `1`), `ISSUE_ARCHITECT_MAX_CHARS` (default `6000`)
-- `GITEA_WEBHOOK_SECRET` (HMAC validation of incoming webhooks)
+- `ISSUE_ARCHITECT_ENABLED` (default `1`), `ISSUE_ARCHITECT_MAX_CHARS` (default `6000`),
+  `ISSUE_ARCHITECT_MAX_ATTEMPTS` (default `2`, then `status:needs_human`)
+- `GITEA_WEBHOOK_SECRET` (HMAC validation of incoming webhooks; required in
+  daemon mode — the handler refuses to start without it)
 - `TELEGRAM_BOT_TOKEN` (optional, start notifications)
 
 ## State

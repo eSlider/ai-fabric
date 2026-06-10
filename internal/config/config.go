@@ -17,6 +17,8 @@ import (
 type ArchitectConfig struct {
 	Enabled  bool
 	MaxChars int
+	// MaxAttempts bounds failed architect runs per issue before needs_human.
+	MaxAttempts int
 }
 
 type IssueBot struct {
@@ -44,9 +46,11 @@ type IssueConfig struct {
 	DryRun         bool
 	// InProgressTimeoutSec marks a status:in_progress issue as stale and reclaimable.
 	InProgressTimeoutSec int
-	Architect            ArchitectConfig
-	Webhook              WebhookConfig
-	Poll                 struct {
+	// AgentTimeoutSec is the hard deadline for a single agent run.
+	AgentTimeoutSec int
+	Architect       ArchitectConfig
+	Webhook         WebhookConfig
+	Poll            struct {
 		Interval struct {
 			Sec *int
 		}
@@ -196,9 +200,11 @@ func LoadConfig() *Config {
 			BaseBranch:           "main",
 			AgentBin:             "agent",
 			InProgressTimeoutSec: 3600,
+			AgentTimeoutSec:      1800,
 			Architect: ArchitectConfig{
-				Enabled:  true,
-				MaxChars: 6000,
+				Enabled:     true,
+				MaxChars:    6000,
+				MaxAttempts: 2,
 			},
 			Webhook: WebhookConfig{
 				CIFixMaxPerSHA: 2,
@@ -228,6 +234,8 @@ func LoadConfig() *Config {
 
 	setStringIfNotEmpty(&cfg.Issue.Webhook.Secret, os.Getenv("GITEA_WEBHOOK_SECRET"))
 	setIntFromEnv(&cfg.Issue.InProgressTimeoutSec, "ISSUE_IN_PROGRESS_TIMEOUT_SEC")
+	setIntFromEnv(&cfg.Issue.AgentTimeoutSec, "ISSUE_AGENT_TIMEOUT_SEC")
+	setIntFromEnv(&cfg.Issue.Architect.MaxAttempts, "ISSUE_ARCHITECT_MAX_ATTEMPTS")
 
 	if cfg.Issue.Poll.Interval.Sec != nil && *cfg.Issue.Poll.Interval.Sec > 0 {
 		cfg.Issue.IssueBot.PollInterval = *cfg.Issue.Poll.Interval.Sec

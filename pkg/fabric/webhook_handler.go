@@ -72,6 +72,17 @@ func (p *giteaWebhookPayload) ownerRepo() (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
+// configuredRepo extracts owner/repo from the payload and rejects events for
+// any repository other than the one this handler is configured for. This
+// guards against org-wide webhooks fanning agent work out to foreign repos.
+func (h *IssueHandler) configuredRepo(p giteaWebhookPayload) (string, string, bool) {
+	owner, repo, ok := p.ownerRepo()
+	if !ok || owner != h.Cfg.Gitea.Owner || repo != h.Cfg.Gitea.Repo {
+		return "", "", false
+	}
+	return owner, repo, true
+}
+
 // validSignature checks the Gitea HMAC-SHA256 webhook signature.
 // An empty configured secret disables validation.
 func (h *IssueHandler) validSignature(body []byte, signature string) bool {
@@ -91,9 +102,9 @@ func (h *IssueHandler) ServeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
-		http.Error(w, "Error reading body", http.StatusInternalServerError)
+		http.Error(w, "Error reading body", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -136,8 +147,8 @@ func (h *IssueHandler) handleIssueWebhook(payload giteaWebhookPayload) {
 		fmt.Printf("[webhook] Ignoring issue from own user %s\n", payload.Sender.Login)
 		return
 	}
-	owner, repo, ok := payload.ownerRepo()
-	if !ok || owner != h.Cfg.Gitea.Owner || repo != h.Cfg.Gitea.Repo {
+	owner, repo, ok := h.configuredRepo(payload)
+	if !ok {
 		return
 	}
 	num := payload.Issue.Number
@@ -164,7 +175,7 @@ func (h *IssueHandler) handlePullRequestWebhook(payload giteaWebhookPayload) {
 	if payload.PullRequest == nil {
 		return
 	}
-	owner, repo, ok := payload.ownerRepo()
+	owner, repo, ok := h.configuredRepo(payload)
 	if !ok {
 		return
 	}
@@ -207,7 +218,7 @@ func (h *IssueHandler) handleCommitStatusWebhook(payload giteaWebhookPayload) {
 	if payload.State != "failure" && payload.State != "error" {
 		return
 	}
-	owner, repo, ok := payload.ownerRepo()
+	owner, repo, ok := h.configuredRepo(payload)
 	if !ok {
 		return
 	}
@@ -261,17 +272,6 @@ func (h *IssueHandler) FixPullRequest(owner, repo string, prNum int64, headSHA s
 	}
 	if state.CIFix[headSHA] >= cfg.CIFixMaxPerSHA || state.totalCIFixes() >= cfg.CIFixMaxPerPR {
 		h.escalateToArchitect(owner, repo, pr)
-		return
-	}
-
-	if err := upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
-		if s.CIFix == nil {
-			s.CIFix = map[string]int{}
-		}
-		s.CIFix[headSHA]++
-		s.Stage = stageDeveloper
-	}); err != nil {
-		fmt.Printf("[fixer] Failed to record fix attempt on PR #%d: %v\n", prNum, err)
 		return
 	}
 
@@ -329,6 +329,16 @@ CI failed on branch %s. Reproduce and fix the failures, then make
 		fmt.Printf("[fixer] Failed to push fix for PR #%d: %v\n", prNum, err)
 		return
 	}
+
+	// Budget is consumed only by a pushed fix: a pushed commit re-triggers CI
+	// and may loop, while failed attempts terminate on their own.
+	_ = upsertStatus(h.Developer, owner, repo, prNum, func(s *workStatus) {
+		if s.CIFix == nil {
+			s.CIFix = map[string]int{}
+		}
+		s.CIFix[headSHA]++
+		s.Stage = stageDeveloper
+	})
 	fmt.Printf("[fixer] Pushed fix for PR #%d\n", prNum)
 }
 

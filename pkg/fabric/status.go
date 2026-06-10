@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "code.gitea.io/sdk/gitea"
@@ -21,11 +22,13 @@ const (
 // inside a hidden HTML comment of a single bot-owned status comment.
 // It replaces both comment-substring attempt counting and per-event comment spam.
 type workStatus struct {
-	Stage     string    `yaml:"stage,omitempty"`
-	Attempts  int       `yaml:"attempts,omitempty"`
-	ClaimedAt time.Time `yaml:"claimed_at,omitempty"`
-	UpdatedAt time.Time `yaml:"updated_at,omitempty"`
-	PRURL     string    `yaml:"pr_url,omitempty"`
+	Stage    string `yaml:"stage,omitempty"`
+	Attempts int    `yaml:"attempts,omitempty"`
+	// ArchAttempts counts failed architect runs; bounded to avoid infinite retries.
+	ArchAttempts int       `yaml:"arch_attempts,omitempty"`
+	ClaimedAt    time.Time `yaml:"claimed_at,omitempty"`
+	UpdatedAt    time.Time `yaml:"updated_at,omitempty"`
+	PRURL        string    `yaml:"pr_url,omitempty"`
 	// CIFix maps a PR head SHA to the number of automated fix attempts on it.
 	CIFix map[string]int `yaml:"ci_fix,omitempty"`
 	// ReviewedSHAs lists PR head SHAs that already received an automated review.
@@ -116,9 +119,17 @@ func loadStatus(client gitea.Client, owner, repo string, number int64) *workStat
 	return &workStatus{}
 }
 
+// statusMu serializes read-modify-write cycles on status comments so
+// concurrent webhook goroutines (review, CI fix, merge) cannot lose updates
+// or create duplicate status comments. Single-process scope is sufficient.
+var statusMu sync.Mutex
+
 // upsertStatus applies mutate to the stored status and writes it back into the
 // single editable status comment (creating it on first use).
 func upsertStatus(client gitea.Client, owner, repo string, number int64, mutate func(*workStatus)) error {
+	statusMu.Lock()
+	defer statusMu.Unlock()
+
 	comment, status := findStatusComment(client, owner, repo, number)
 	if status == nil {
 		status = &workStatus{}

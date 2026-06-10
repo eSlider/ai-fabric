@@ -1,6 +1,8 @@
 package fabric
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -223,6 +225,50 @@ func (h *IssueHandler) RunOnce(targetIssue int) {
 			fmt.Printf("[issue-handler] Error processing issue #%d: %v\n", issue.Index, err)
 		}
 	}
+
+	h.cleanupWorktrees()
+}
+
+// worktreeMaxAge is how long an agent worktree may stay untouched before it is
+// pruned; worktrees are disposable and recreated on demand.
+const worktreeMaxAge = 24 * time.Hour
+
+// cleanupWorktrees removes stale agent worktrees so var/agents does not grow
+// without bound. Busy worktrees are never touched.
+func (h *IssueHandler) cleanupWorktrees() {
+	agentsDir := filepath.Join(h.Cfg.RootDir, "var", "agents")
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return
+	}
+
+	h.busyMu.Lock()
+	busy := len(h.busyIssues) + len(h.busyPRs)
+	h.busyMu.Unlock()
+	if busy > 0 {
+		// Cheap conservative guard: skip cleanup entirely while anything runs,
+		// instead of mapping directory names back to claim keys.
+		return
+	}
+
+	pruned := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < worktreeMaxAge {
+			continue
+		}
+		path := filepath.Join(agentsDir, entry.Name())
+		fmt.Printf("[issue-handler] Pruning stale worktree %s\n", path)
+		_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "worktree", "remove", "--force", path)
+		_ = os.RemoveAll(path)
+		pruned = true
+	}
+	if pruned {
+		_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "worktree", "prune")
+	}
 }
 
 func statusLabel(issue *sdk.Issue) string {
@@ -322,6 +368,17 @@ func (h *IssueHandler) RunArchitectStage(issue *sdk.Issue) error {
 		return nil
 	}
 
+	// Bounded retries: a persistently failing architect must not burn model
+	// budget every poll cycle; hand over to a human instead.
+	state := loadStatus(h.Developer, owner, repo, num)
+	if state.ArchAttempts >= h.Cfg.Issue.Architect.MaxAttempts {
+		fmt.Printf("[issue-handler] Architect budget exhausted for issue #%d, needs human\n", num)
+		_ = h.SetStatusLabel(num, "needs_human")
+		return upsertStatus(h.Developer, owner, repo, num, func(s *workStatus) {
+			s.Stage = stageFailed
+		})
+	}
+
 	_ = upsertStatus(h.Developer, owner, repo, num, func(s *workStatus) {
 		s.Stage = stageArchitect
 	})
@@ -339,6 +396,9 @@ func (h *IssueHandler) RunArchitectStage(issue *sdk.Issue) error {
 
 	out, err := h.runAgent(path, promptPath, h.Architect)
 	if err != nil {
+		_ = upsertStatus(h.Developer, owner, repo, num, func(s *workStatus) {
+			s.ArchAttempts++
+		})
 		return fmt.Errorf("architect agent failed: %w: %s", err, out)
 	}
 
@@ -443,11 +503,21 @@ func (h *IssueHandler) SetStatusLabel(num int64, status string) error {
 	return h.Developer.AddIssueLabel(owner, repo, num, "status:"+status)
 }
 
+// ensureSafeDirectory marks dir as a git safe.directory exactly once; the
+// previous unconditional --add grew the global config by one line per run.
+func (h *IssueHandler) ensureSafeDirectory(dir string) {
+	existing, _ := h.runCommand(h.Cfg.RootDir, nil, "git", "config", "--global", "--get-all", "safe.directory")
+	if slices.Contains(strings.Split(existing, "\n"), dir) {
+		return
+	}
+	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "config", "--global", "--add", "safe.directory", dir)
+}
+
 // ensureWorktree (re)creates a worktree for branch at path, based on baseRef.
 // Callers must hold the busy claim for the issue/PR owning the path.
 func (h *IssueHandler) ensureWorktree(branch, path, baseRef string) error {
-	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "config", "--global", "--add", "safe.directory", h.Cfg.RootDir)
-	_, _ = h.runCommand(h.Cfg.RootDir, nil, "git", "config", "--global", "--add", "safe.directory", "/workspace")
+	h.ensureSafeDirectory(h.Cfg.RootDir)
+	h.ensureSafeDirectory("/workspace")
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -465,12 +535,37 @@ func (h *IssueHandler) ensureWorktree(branch, path, baseRef string) error {
 	return nil
 }
 
+// defaultCommandTimeout bounds git and check subprocesses; agent runs use the
+// configurable ISSUE_AGENT_TIMEOUT_SEC instead.
+const defaultCommandTimeout = 10 * time.Minute
+
 func (h *IssueHandler) runCommand(cwd string, extraEnv []string, name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+	return h.runCommandTimeout(defaultCommandTimeout, cwd, extraEnv, name, args...)
+}
+
+// runCommandTimeout executes a subprocess with a hard deadline so a hung agent
+// or check can never block the poll loop and hold busy claims forever.
+func (h *IssueHandler) runCommandTimeout(timeout time.Duration, cwd string, extraEnv []string, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.WaitDelay = 10 * time.Second
+
 	out, err := cmd.CombinedOutput()
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("%s timed out after %s", name, timeout)
+	}
 	return strings.TrimSpace(string(out)), err
+}
+
+func (h *IssueHandler) agentTimeout() time.Duration {
+	if sec := h.Cfg.Issue.AgentTimeoutSec; sec > 0 {
+		return time.Duration(sec) * time.Second
+	}
+	return 30 * time.Minute
 }
 
 // roleIdentityEnv returns env vars attributing git commits to the role's Gitea user.
@@ -743,7 +838,7 @@ func (h *IssueHandler) runAgent(path, promptPath string, role gitea.Client) (str
 	}
 	args = append(args, string(promptData))
 
-	return h.runCommand(path, roleIdentityEnv(role), agentBin, args...)
+	return h.runCommandTimeout(h.agentTimeout(), path, roleIdentityEnv(role), agentBin, args...)
 }
 
 func (h *IssueHandler) runChecks(path string) (string, error) {

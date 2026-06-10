@@ -13,7 +13,8 @@ done
 if [[ -f "${ROOT_DIR}/go.mod" ]] && command -v go >/dev/null 2>&1; then
   (
     cd "${ROOT_DIR}"
-    go test ./cmd/... ./pkg/... >/dev/null
+    go build ./cmd/... ./pkg/... ./internal/...
+    go vet ./cmd/... ./pkg/... ./internal/...
   )
 fi
 

@@ -11,10 +11,10 @@ x-go-service-base: &go-service-base
     - .:/workspace
     - ./bin/issue-handler:/usr/local/bin/issue-handler:ro
     - ./bin/tg-bot:/usr/local/bin/tg-bot:ro
-    - /home/user/.local/share/cursor-agent:/usr/local/share/cursor-agent:ro
-    - /home/user/.cursor:/workspace/.cursor
+    - "${CURSOR_AGENT_HOME_DIR:-${HOME}/.local/share/cursor-agent}:/usr/local/share/cursor-agent:ro"
+    - "${CURSOR_SETTINGS_DIR:-${HOME}/.cursor}:/workspace/.cursor"
     # cursor-agent CLI credentials (auth.json) live in XDG config dir
-    - /home/user/.config/cursor:/workspace/.config/cursor
+    - "${CURSOR_CONFIG_DIR:-${HOME}/.config/cursor}:/workspace/.config/cursor"
     - /var/run/docker.sock:/var/run/docker.sock
   depends_on:
     gitea:
@@ -83,9 +83,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./bin/gitea-runner-command.sh:/usr/local/bin/gitea-runner-command.sh:ro
-    deploy:
-      mode: replicated
-      replicas: 2
+      # Persist runner registration across container recreation.
+      - ./var/runner-1:/tmp/runner
     entrypoint: ["/bin/sh", "/usr/local/bin/gitea-runner-command.sh"]
 
   gitea-mcp:
@@ -104,6 +103,11 @@ services:
     # Runs with host networking (see base); the webhook server listens on host port 8082.
     <<: *go-service-base
     command: ["issue-handler"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8082/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     labels:
       - "service=issue-handler"
 
