@@ -29,6 +29,8 @@ if [ -z "${GITEA_RUNNER_REGISTRATION_TOKEN:-}" ] || [ "${GITEA_RUNNER_REGISTRATI
   exec sleep infinity
 fi
 
+# Already-registered runners keep stale labels until /tmp/runner/.runner (and
+# persisted config) are removed or the container/volume is recreated.
 if [ ! -f /tmp/runner/.runner ]; then
   act_runner register --no-interactive \
     --instance "${GITEA_INSTANCE_URL}" \
