@@ -687,8 +687,9 @@ func (h *IssueHandler) ReviewPullRequest(owner, repo string, prNum int64) {
 Title: %s
 
 You are acting as code reviewer. Review the diff below against
-docs/skills/engineering-principles.md: reject duplication, speculative
-abstractions, mock-based tests, and violations of the 3-tier boundaries.
+docs/skills/lazy-senior-dev.md and docs/skills/engineering-principles.md:
+reject duplication, speculative abstractions, mock-based tests, and violations
+of the 3-tier boundaries.
 Verify the change traces to its issue and reuses existing code where possible.
 
 Scope rule: only findings that block this PR's linked issue belong in scope.

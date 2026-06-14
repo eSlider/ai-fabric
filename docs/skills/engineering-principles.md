@@ -5,6 +5,9 @@ The architect designs within them, the developer implements within them,
 the reviewer rejects violations. They exist so the fabric can grow into a
 multi-project assistant without collapsing under its own code.
 
+Operationalized by `docs/skills/lazy-senior-dev.md` (YAGNI ladder, ponytail
+comments on intentional shortcuts). When in doubt: delete, don't abstract.
+
 ## 1. Reuse first, no busywork
 
 - Before writing any code, search for an existing tool, library, SDK, or

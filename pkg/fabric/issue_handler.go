@@ -37,6 +37,8 @@ const (
 )
 
 var closesIssueRegex = regexp.MustCompile(`Closes #(\d+)`)
+var issueSlugRegex = regexp.MustCompile(`[^a-z0-9]+`)
+var tgChatRegex = regexp.MustCompile(TgChatRegex)
 
 type IssueHandler struct {
 	Cfg *config.Config
@@ -46,7 +48,7 @@ type IssueHandler struct {
 	Reviewer  gitea.Client
 	Architect gitea.Client
 
-	busyMu     sync.Mutex
+	busyMu     sync.Mutex // ponytail: in-process only; upgrade: distributed lock (Redis/etcd) if multi-instance.
 	busyIssues map[int64]bool
 	busyPRs    map[int64]bool
 
@@ -88,8 +90,7 @@ func (h *IssueHandler) tryClaim(busy map[int64]bool, number int64) bool {
 	return true
 }
 
-// claimWithRetry retries tryClaim a few times; webhook events can race with a
-// just-finished push that still holds the claim.
+// claimWithRetry retries tryClaim a few times; ponytail: fixed sleep, no jitter; fine for single host.
 func (h *IssueHandler) claimWithRetry(busy map[int64]bool, number int64, attempts int, delay time.Duration) bool {
 	for range attempts {
 		if h.tryClaim(busy, number) {
@@ -181,8 +182,9 @@ func (h *IssueHandler) ClassifyIssue(issue *sdk.Issue) string {
 func (h *IssueHandler) SelectSkills(issue *sdk.Issue) []string {
 	text := strings.ToLower(issue.Title + "\n" + issue.Body)
 	skills := []string{
-		"docs/skills/agent-guidelines.md",
+		"docs/skills/lazy-senior-dev.md",
 		"docs/skills/engineering-principles.md",
+		"docs/skills/agent-guidelines.md",
 		"docs/skills/solution-architect.md",
 		"docs/skills/developer.md",
 		"docs/workflows/ci-cd.md",
@@ -198,11 +200,7 @@ func (h *IssueHandler) SelectSkills(issue *sdk.Issue) []string {
 		"issue":    "docs/workflows/pr-best-practices.md",
 	}
 	for key, path := range matrix {
-		if !strings.Contains(text, key) {
-			continue
-		}
-		found := slices.Contains(skills, path)
-		if !found {
+		if strings.Contains(text, key) && !slices.Contains(skills, path) {
 			skills = append(skills, path)
 		}
 	}
@@ -313,8 +311,7 @@ func (h *IssueHandler) cleanupWorktrees() {
 	busy := len(h.busyIssues) + len(h.busyPRs)
 	h.busyMu.Unlock()
 	if busy > 0 {
-		// Cheap conservative guard: skip cleanup entirely while anything runs,
-		// instead of mapping directory names back to claim keys.
+		// ponytail: skip entire cleanup while any issue/PR is busy; upgrade: map worktree dir → claim key.
 		return
 	}
 
@@ -418,7 +415,7 @@ func (h *IssueHandler) ProcessIssue(issue *sdk.Issue) error {
 }
 
 func telegramChatID(body string) (int64, bool) {
-	match := regexp.MustCompile(TgChatRegex).FindStringSubmatch(body)
+	match := tgChatRegex.FindStringSubmatch(body)
 	if len(match) < 2 {
 		return 0, false
 	}
@@ -827,11 +824,12 @@ Implement the issue end-to-end in this repository:
 ## Relevant skills/docs to read first
 %s
 
-## Constraints (inviolable, see docs/skills/engineering-principles.md)
+## Constraints (inviolable)
+- Primary skill: docs/skills/lazy-senior-dev.md (YAGNI, stdlib-first, ponytail on shortcuts)
+- See docs/skills/engineering-principles.md (reuse-first, no mocks, 3-tier, YAML over JSON)
 - Keep changes scoped to this issue; no work for work's sake
 - Reuse existing packages, libraries and upstream SDK types before writing new code
 - No mock-based or isolated unit tests: only use-case, API and system-level tests
-- Prefer YAML over JSON for configuration and exchange formats
 - Follow PR template and workflow policies
 `, issue.Index, issueType, issue.Title, body, strings.Join(skillLines, "\n"))
 
@@ -889,8 +887,9 @@ Produce a concise markdown analysis with this exact structure:
 - list relevant docs/skills from repository
 
 Do not include any content outside these sections.
-The design must follow docs/skills/engineering-principles.md (Occam's razor,
-YAGNI, idiomatic Go, 3-tier boundaries, no duplication, reuse-first).
+The design must follow docs/skills/lazy-senior-dev.md and
+docs/skills/engineering-principles.md (Occam's razor, YAGNI, idiomatic Go,
+3-tier boundaries, no duplication, reuse-first).
 
 ## Issue body
 %s
@@ -974,8 +973,7 @@ func (h *IssueHandler) runPullRequestChecks(path, owner, repo string, prNum int6
 }
 
 func (h *IssueHandler) issueBranch(issueNumber int64, title string) string {
-	reg := regexp.MustCompile("[^a-z0-9]+")
-	slug := strings.Trim(reg.ReplaceAllString(strings.ToLower(title), "-"), "-")
+	slug := strings.Trim(issueSlugRegex.ReplaceAllString(strings.ToLower(title), "-"), "-")
 	if len(slug) > 40 {
 		slug = slug[:40]
 	}

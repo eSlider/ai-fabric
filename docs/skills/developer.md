@@ -1,5 +1,7 @@
 # Developer Skill Guide
 
+Read `docs/skills/lazy-senior-dev.md` first — it is the primary implementation skill.
+
 ## Mission
 
 Implement issue requirements into working code with minimal, safe changes.

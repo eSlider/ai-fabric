@@ -8,6 +8,7 @@ import (
 
 // FallbackBaseURLForDNSError rewrites a gitea hostname base URL to localhost when
 // err is a DNS lookup/dial failure against that host (bot-on-host workaround).
+// ponytail: hostname=="gitea" only; upgrade: configurable host→localhost map.
 func FallbackBaseURLForDNSError(baseURL string, err error) (string, bool) {
 	if err == nil || baseURL == "" {
 		return "", false

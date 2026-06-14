@@ -9,6 +9,7 @@ High-signal documentation for the AI fabric PoC.
   - `workflows/monitoring.md` status labels and the single status comment
   - `workflows/backup-restore.md` Gitea data backup and disaster recovery
 - `skills/` agent runbooks and working agreements
+  - `skills/lazy-senior-dev.md` primary skill (YAGNI, ponytail comments)
   - `skills/engineering-principles.md` inviolable rules (reuse-first, no mocks, YAML over JSON)
 - `plans/` accepted plans and ADR-like decisions
 - `sources/` external references captured in structured form

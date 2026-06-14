@@ -2,6 +2,7 @@
 
 Primary guidance is in:
 
+- `docs/skills/lazy-senior-dev.md` (main skill: YAGNI, stdlib-first, ponytail comments)
 - `docs/README.md`
 - `docs/skills/engineering-principles.md` (inviolable rules: reuse-first, Occam/YAGNI, 3-tier, YAML over JSON)
 - `docs/skills/agent-guidelines.md`

@@ -212,7 +212,7 @@ func runComposeLogs(service string) string {
 	return string(out)
 }
 
-func botConfigFrom(cfg config) gitea.BotConfig {
+func giteaConfig(cfg config) gitea.BotConfig {
 	return gitea.BotConfig{
 		BaseURL: cfg.GiteaBaseURL,
 		Owner:   cfg.GiteaOwner,
@@ -226,7 +226,7 @@ func listProjects(cfg config) (string, error) {
 		return "", fmt.Errorf("gitea project variables are not fully configured")
 	}
 
-	svc := gitea.NewService(botConfigFrom(cfg))
+	svc := gitea.NewService(giteaConfig(cfg))
 	repos, err := svc.ListOwnerRepos(cfg.GiteaOwner, cfg.ProjectListLimit)
 	if err != nil {
 		return "", err
@@ -258,7 +258,7 @@ func createTaskIssue(cfg config, description string, chatID int64) (string, erro
 		return "", fmt.Errorf("gitea issue variables are not fully configured")
 	}
 
-	svc := gitea.NewService(botConfigFrom(cfg))
+	svc := gitea.NewService(giteaConfig(cfg))
 	body := fmt.Sprintf("%s\n\n<!-- ai-fabric:telegram-chat-id:%d -->", description, chatID)
 	issue, err := svc.CreateIssue(cfg.GiteaOwner, cfg.GiteaRepo, "[task] "+trimLen(description, 90), body)
 	if err != nil {
@@ -403,20 +403,31 @@ func parseMCPToolRequest(text string) (string, map[string]any, error) {
 	return toolName, args, nil
 }
 
-func listMCPTools(cfg config) (string, error) {
-	_, httpResp, err := mcpRPC(cfg, 1, "initialize", map[string]any{
+func mcpInitParams() map[string]any {
+	return map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]string{
 			"name":    "ai-fabric-tg-bot",
 			"version": "0.1.0",
 		},
-	}, "")
+	}
+}
+
+func mcpSession(cfg config) (string, error) {
+	_, httpResp, err := mcpRPC(cfg, 1, "initialize", mcpInitParams(), "")
+	if err != nil {
+		return "", err
+	}
+	return httpResp.Header.Get("Mcp-Session-Id"), nil
+}
+
+func listMCPTools(cfg config) (string, error) {
+	sessionID, err := mcpSession(cfg)
 	if err != nil {
 		return "", err
 	}
 
-	sessionID := httpResp.Header.Get("Mcp-Session-Id")
 	toolsResp, _, err := mcpRPC(cfg, 2, "tools/list", map[string]any{}, sessionID)
 	if err != nil {
 		return "", err
@@ -452,19 +463,11 @@ func listMCPTools(cfg config) (string, error) {
 }
 
 func callMCPTool(cfg config, toolName string, args map[string]any) (string, error) {
-	_, httpResp, err := mcpRPC(cfg, 1, "initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo": map[string]string{
-			"name":    "ai-fabric-tg-bot",
-			"version": "0.1.0",
-		},
-	}, "")
+	sessionID, err := mcpSession(cfg)
 	if err != nil {
 		return "", err
 	}
 
-	sessionID := httpResp.Header.Get("Mcp-Session-Id")
 	toolResp, _, err := mcpRPC(cfg, 2, "tools/call", map[string]any{
 		"name":      toolName,
 		"arguments": args,

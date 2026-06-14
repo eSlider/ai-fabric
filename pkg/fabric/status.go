@@ -124,9 +124,7 @@ func loadStatus(client gitea.Client, owner, repo string, number int64) *workStat
 	return &workStatus{}
 }
 
-// statusMu serializes read-modify-write cycles on status comments so
-// concurrent webhook goroutines (review, CI fix, merge) cannot lose updates
-// or create duplicate status comments. Single-process scope is sufficient.
+// ponytail: global mutex; fine for single-process issue-handler; shard by repo if multi-instance.
 var statusMu sync.Mutex
 
 // upsertStatus applies mutate to the stored status and writes it back into the
