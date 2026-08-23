@@ -22,6 +22,20 @@ description: Git workflow for the <project> repo and owned go-* libraries — Gi
 - The `(#id)` ref ties the commit to its Gitea issue; when merged it closes/references the issue.
 - Never commit secrets, `.env`, or keys. Secrets live in gitignored files.
 
+## HARD RULE — secret-scan BEFORE ANY PUSH
+
+- **BEFORE ANY PUSH**, run the secret scanner (gitleaks) on the commits being
+  pushed. Do NOT push if anything is found.
+- Automatic guard: the repo installs a git **pre-push** hook (`scripts/githooks/`,
+  install via `./scripts/githooks/install.sh`) that scans the new-commit diff with
+  gitleaks and **blocks** the push (exit 1) on any leak. There is also a
+  **pre-commit** hook for staged changes.
+- Explicit command (fallback if the hook is unavailable):
+  `gitleaks detect --source . --log-opts="<base-ref>..HEAD" --redact --verbose`
+  e.g. `gitleaks detect --source . --log-opts="origin/release/v1..HEAD" --redact --verbose`
+  Exit code != 0 ⇒ leaks found ⇒ **do not push**; remove the secret first.
+- CI also runs the same scan on `pull_request` + `push` (fail-on-leak ⇒ red CI).
+
 ## PR → review → CI → merge
 
 1. Push branch `type/slug#issue`.
