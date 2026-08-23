@@ -1,10 +1,9 @@
-# Required ownership policy file (see docs/workflows/pr-best-practices.md).
-# Critical paths: workflows, infra, scripts, and workflow docs.
+# Required ownership policy file (see workflows/pr-best-practices.md).
+# Critical paths: decisions, workflows, skills, sync script.
 # Default owners for all other changes in this repository.
 
-/.gitea/ @eslider
-/bin/ @eslider
-docker-compose.yml @eslider
-/docs/workflows/ @eslider
-/docs/skills/ @eslider
+/decisions/ @eslider
+/workflows/ @eslider
+/skills/ @eslider
+/sync.sh @eslider
 * @eslider

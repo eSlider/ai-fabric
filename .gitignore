@@ -1,11 +1,3 @@
-# Runtime and generated state
-var/
-# Go module/build cache (created when HOME=/workspace in compose services)
-go/
-.env
-.gitconfig
-dist/
-
 # Local/editor noise
 .DS_Store
 .docker/
@@ -13,11 +5,13 @@ dist/
 .vscode/
 .cursor/
 .cache/
+dist/
 
-# Compiled binaries (built locally, mounted into containers)
-bin/issue-handler
-bin/tg-bot
+# Secrets and env
+.env
+.env.local
+.gitconfig
 
-# Generated agent prompts (ephemeral runtime artifacts)
-.issue-agent-prompt.md
-.issue-architect-prompt.md
+# Runtime / generated state
+var/
+go/
