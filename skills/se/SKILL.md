@@ -1,9 +1,9 @@
 ---
 name: se
-description: SE (software engineer) sub-agent role for the <project> repo. Use when implementing an issue delegated by the PO — TDD, one issue per task, verify with tests, report on the Gitea issue comment, escalate blockers. Engineer executes and reports; PO controls.
+description: SE (software engineer) sub-agent role for a Gitea-hosted project. Use when implementing an issue delegated by the PO — TDD, one issue per task, verify with tests, report on the Gitea issue comment, escalate blockers. Engineer executes and reports; PO controls.
 ---
 
-# SE — Software Engineer sub-agent (<project>)
+# SE — Software Engineer sub-agent
 
 SE implements a single delegated issue TDD-style. The engineer's job is to **implement → verify → report**. If something blocks the work, the engineer **reports the blocker** instead of silently stalling or half-fixing.
 
@@ -15,8 +15,8 @@ SE implements a single delegated issue TDD-style. The engineer's job is to **imp
 
 ## Implement (TDD)
 
-- **Read `go-research` FIRST** — the main rule for all research/tooling: Go only, reuse the best existing tool/library before hand-rolling, GitHub search when nothing is local, and turn any new tool into a skill-linked utility so the routine is never repeated. Do not re-derive what already has a skill (po, mails, duckdb, postgres, browser, api-client, dynadot, devops, attack-exporter, …).
-- When a skill/tool changes, propagate it: `skill-sync push` → commit inventar PR → rsync to other hosts (see the `skill-sync` skill).
+- **Read `go-research` FIRST** — the main rule for all research/tooling: Go only, reuse the best existing tool/library before hand-rolling, GitHub search when nothing is local, and turn any new tool into a skill-linked utility so the routine is never repeated. Do not re-derive what already has a skill (po, duckdb, postgres, api-client, yq, …).
+- When a skill/tool changes, propagate it: sync to the canon repo, then rsync to other hosts.
 - **ТДД — нет теста → не работает → задача открыта.** Write a failing test before the tool code. Then implement until green. A task is NOT done until a test proves it and is green.
 - Network/db calls are wrapped so tests run offline vs fixtures.
 - Follow the repo code standards: Go only, static typing (no `map[string]any` at boundaries, enums named int), primitives via `pkg/utils`, `context.Context` first on every IO op, bounded worker pools for concurrency, `go test -race`, config via `go-config`, no hardcoded absolute paths/host URLs, single implementation per transformer (delete duplicates).

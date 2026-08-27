@@ -1,7 +1,7 @@
 ---
 name: picoclaw
 description: >-
-  <project> is the memory/fact gate. Compose runs the official PicoClaw gateway.
+  The project brain is the memory/fact gate. Compose runs the official PicoClaw gateway.
   Use when wiring PicoClaw or any MCP client: call brain search/get/audit
   before a factual reply. throttled is not a negative finding.
 ---

@@ -125,7 +125,7 @@ func TestCmdPR(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	out := capture(func() { cmdPR(c, "eSlider", "<project>", []string{"42"}) })
+	out := capture(func() { cmdPR(c, "owner", "project", []string{"42"}) })
 	for _, want := range []string{"[open]", "mergeable: yes", "feat/x#1", "abcdef01", "release/v1", "main.go", "+4 -1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pr output missing %q:\n%s", want, out)
@@ -139,7 +139,7 @@ func TestCmdPRsMergeable(t *testing.T) {
 			{"number":8,"state":"open","title":"B","mergeable":false,"merged":false},
 			{"number":9,"state":"closed","title":"C","mergeable":true,"merged":true}]`))
 	}))
-	out := capture(func() { cmdPRs(c, "eSlider", "<project>", []string{"open"}) })
+	out := capture(func() { cmdPRs(c, "owner", "project", []string{"open"}) })
 	for _, want := range []string{"#7", "m=yes", "m=no", "#9", "m=-"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prs output missing %q:\n%s", want, out)
@@ -153,7 +153,7 @@ func TestCmdRun(t *testing.T) {
 			{"id":11,"run_number":5,"status":"in_progress","head_branch":"feat/x","head_sha":"aaaa","display_title":"T1","html_url":"http://x/r/11"},
 			{"id":10,"run_number":4,"status":"completed","conclusion":"success","head_branch":"feat/x","head_sha":"bbbb","display_title":"T2","html_url":"http://x/r/10"}]}`))
 	}))
-	out := capture(func() { cmdRun(c, "eSlider", "<project>", []string{"feat/x"}) })
+	out := capture(func() { cmdRun(c, "owner", "project", []string{"feat/x"}) })
 	for _, want := range []string{"in_progress", "success", "HEAD run 11"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("run output missing %q:\n%s", want, out)
@@ -174,7 +174,7 @@ func TestCmdMerge(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	out := capture(func() { cmdMerge(c, "eSlider", "<project>", []string{"42"}) })
+	out := capture(func() { cmdMerge(c, "owner", "project", []string{"42"}) })
 	for _, want := range []string{"merged #42", "merged: true", "http://x/pulls/42"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("merge output missing %q: %q", want, out)
@@ -200,7 +200,7 @@ func TestCmdPRCreate(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"number":60,"title":"T","html_url":"http://x/pulls/60"}`)
 	}))
-	out := capture(func() { cmdPRCreate(c, "eSlider", "<project>", []string{"feat/x#187", "release/v1", "T", "B"}) })
+	out := capture(func() { cmdPRCreate(c, "owner", "project", []string{"feat/x#187", "release/v1", "T", "B"}) })
 	for _, want := range []string{"created PR #60", "http://x/pulls/60"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pr-create output missing %q:\n%s", want, out)
@@ -222,7 +222,7 @@ func TestCmdIssueShow(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	out := capture(func() { cmdIssueShow(c, "eSlider", "<project>", []string{"9"}) })
+	out := capture(func() { cmdIssueShow(c, "owner", "project", []string{"9"}) })
 	for _, want := range []string{"[open]", "T", "body text", "epic, bug", "sprint-1", "alice", "first", "bob", "second"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue-show output missing %q:\n%s", want, out)
@@ -243,7 +243,7 @@ func TestCmdJobLogs(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	out := capture(func() { cmdJobLogs(c, "eSlider", "<project>", []string{"9"}) })
+	out := capture(func() { cmdJobLogs(c, "owner", "project", []string{"9"}) })
 	for _, want := range []string{"job 100 Test: FAILED", "> step 2 go vet", "fatal: boom"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("joblogs output missing %q:\n%s", want, out)
@@ -258,7 +258,7 @@ func TestCmdJobLogsNoFailed(t *testing.T) {
 	c := testClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"total_count":1,"jobs":[{"id":100,"run_id":9,"name":"Test","conclusion":"success","steps":[]}]}`))
 	}))
-	out := capture(func() { cmdJobLogs(c, "eSlider", "<project>", []string{"9"}) })
+	out := capture(func() { cmdJobLogs(c, "owner", "project", []string{"9"}) })
 	if !strings.Contains(out, "no failed jobs") {
 		t.Errorf("joblogs output = %q", out)
 	}
@@ -273,7 +273,7 @@ func TestCmdIssueCreate(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprintf(w, `{"number":190,"title":"t"}`)
 	}))
-	out := capture(func() { cmdIssueCreate(c, "eSlider", "<project>", []string{"t", "b"}) })
+	out := capture(func() { cmdIssueCreate(c, "owner", "project", []string{"t", "b"}) })
 	if !strings.Contains(out, "created #190") {
 		t.Errorf("issue-create output = %q", out)
 	}
@@ -291,7 +291,7 @@ func TestCmdScan(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	out := capture(func() { cmdScan(c, "eSlider", "<project>", []string{"feat/x", "release/v1"}) })
+	out := capture(func() { cmdScan(c, "owner", "project", []string{"feat/x", "release/v1"}) })
 	for _, want := range []string{"2 hit(s)", "secret:aws-access-key", "config.yml:2", "config.yml:11"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("scan output missing %q:\n%s", want, out)

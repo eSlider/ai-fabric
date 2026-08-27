@@ -1,4 +1,4 @@
-// Command po is the PO assistant for Gitea (<project> & co). Uses the Gitea SDK
+// Command po is the PO assistant for Gitea (project & owned repos). Uses the Gitea SDK
 // (code.gitea.io/sdk/gitea) directly — no shell/jq/yq/python wrapper.
 //
 // Config: token + host are read from the tea config (~/.tea/tea.yml), same login

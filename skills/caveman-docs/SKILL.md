@@ -1,9 +1,9 @@
 ---
 name: caveman-docs
 description: >-
-  Caveman markdown style for all internal project documentation: short
+  Caveman markdown style for internal project documentation: short
   sentences, plain words, lists, no hype. Use when writing or editing any markdown
-  in these repos.
+  in the project repos.
 ---
 
 # caveman-docs

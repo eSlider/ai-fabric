@@ -1,30 +1,30 @@
 ---
 name: git-workflow
-description: Git workflow for the <project> repo and owned go-* libraries — Gitea-only work, branches, Conventional Commits, PR → review → CI → merge into release/v1, SemVer tagging, merge-order discipline to avoid conflicts. Use for all git/PR/review operations.
+description: Git workflow for a Gitea-hosted project and its owned go-* libraries — Gitea-only work, branches, Conventional Commits, PR → review → CI → merge into release/v1, SemVer tagging, merge-order discipline to avoid conflicts. Use for all git/PR/review operations.
 ---
 
-# Git Workflow (<project> + owned go-* repos)
+# Git Workflow (Gitea-hosted project + owned go-* repos)
 
 ## Canonical home — Gitea only
 
-- Canonical repo: `git.<host>/<owner>/<project>`. Owned libraries (`github.com/eSlider/go-*`) work on Gitea `git.<host>/eSlider/<repo>`. GitHub is a **publish mirror only**.
+- Canonical repo: `git.<host>/<owner>/<project-repo>`. Owned libraries (`github.com/eSlider/go-*`) work on Gitea `git.<host>/eSlider/<repo>`. GitHub is a **publish mirror only**.
 - Issues, PRs, reviews, epics, milestones, releases exist **only on Gitea** — never on GitHub.
-- **GitHub = showroom (rule #190)**: nothing non-project lands on the GitHub
+- **GitHub = showroom**: nothing non-project lands on the GitHub
   mirror — no sales/offer material, no internal paths/hosts/ports, no
   host-specific docs. Before pushing a branch/tag to GitHub, verify the diff
-  is project content (like the #142 gitleaks scan, but by content too).
-  A leaked feature is purged from GitHub history with `git filter-repo`
-  (precedent #152/#190); Gitea stays the canonical home.
+  is project content (e.g. the gitleaks scan, but by content too).
+  A leaked feature is purged from GitHub history with `git filter-repo`;
+  Gitea stays the canonical home.
 
 ## Branching
 
-- Branch name: `type/slug#issue` (e.g. `feat/content-url-addressing#100`, `chore/jitsi-deploy#135`).
+- Branch name: `type/slug#issue` (e.g. `feat/feature-slug#123`, `chore/deploy-x#456`).
 - Types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`.
 - No direct pushes to `main`/`release/*`. Work happens on the branch; integration happens via PR.
 
 ## Commits
 
-- Conventional Commits: `type(scope): summary (#id)` — e.g. `feat(jitsi): deploy jitsi meet stack (#135)`.
+- Conventional Commits: `type(scope): summary (#id)` — e.g. `feat(auth): add oidc login (#123)`.
 - The `(#id)` ref ties the commit to its Gitea issue; when merged it closes/references the issue.
 - Never commit secrets, `.env`, or keys. Secrets live in gitignored files.
 

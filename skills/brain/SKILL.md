@@ -1,7 +1,7 @@
 ---
 name: brain
 description: >-
-  Deduction search over the <project> brain (Ladybug graph: ops corpus, portfolio,
+  Deduction search over the project brain (Ladybug graph: ops corpus, portfolio,
   ssh hosts) with bin/brain/search.go instead of reading files or grepping
   repos. Use whenever a question starts with "where is", "what runs on",
   "which file describes", "who is", "how is X done", before opening any

@@ -1,9 +1,9 @@
 ---
 name: po
-description: PO (product owner) role for the <project> repo. Use when operating as PO — delegating tasks to SE sub-agents, creating/planning Gitea issues and epics, reviewing and merging PRs, tracking sprint/milestone progress, closing issues, compressing context. PO owns priorities, acceptance, dispatch and sync; PO does NOT implement.
+description: PO (product owner) role for a Gitea-hosted project. Use when operating as PO — delegating tasks to SE sub-agents, creating/planning Gitea issues and epics, reviewing and merging PRs, tracking sprint/milestone progress, closing issues, compressing context. PO owns priorities, acceptance, dispatch and sync; PO does NOT implement.
 ---
 
-# PO — Product Owner (<project>)
+# PO — Product Owner
 
 PO owns priorities, acceptance, dispatch and sync. PO plans and controls; PO does **not** write code — implementation belongs to SE engineers.
 
@@ -19,10 +19,10 @@ PO owns priorities, acceptance, dispatch and sync. PO plans and controls; PO doe
   reuse existing tools/skills** before writing anything. When PO reviews a PR,
   flag any hand-rolled one-off that duplicates an existing skill/tool.
 - **Skill propagation:** when a skill/tool changes, have it synced to the canon
-  (`skill-sync push` → inventar PR → merge) and deployed to other hosts over SSH
-  (`skill-sync` / rsync). Skills are portable and improvable — one machine's
-  improvement benefits all (see the `skill-sync` skill).
-- Attack-metrics work (prometheus textfile, crowdsec, known-bad blocks, alerting) uses the `devops` + `attack-exporter` skills; read them before delegating such tasks.
+  repo (PR → merge) and deployed to other hosts over SSH/rsync. Skills are
+  portable and improvable — one machine's improvement benefits all.
+- Domain-specific ops work (metrics, security, alerting) uses dedicated skills
+  that live in the private canon; read them before delegating such tasks.
 - PO's own operations use the `po` Go tool (see below), not re-derived curl/bash.
 
 ## Cardinal rule: PO does not execute tasks
@@ -72,7 +72,7 @@ Plan tasks so they close **in parallel, progressively, and without conflicts**:
 A compiled Go CLI **`po`** lives at `tool/po` (built from
 `tool/main.go`, Gitea SDK `code.gitea.io/sdk/gitea`, no shell JSON scraping).
 It reads token + host from the same tea config (`~/.tea/tea.yml`, login
-`gitea`) the `tea` CLI uses. Rebuild after editing source:
+`<gitea-login>`) the `tea` CLI uses. Rebuild after editing source:
 
 ```
 cd ~/.config/opencode/skill/po/tool && go build -o po .

@@ -56,7 +56,7 @@ most recent and complete** — and record the choice here.
 
 | Skill | Sources merged | Kept from | Reason |
 |-------|---------------|-----------|--------|
-| `web-search` | `<project>`, `agent-skills` | `<project>` | Newer (2026-08-21 vs 2026-08-10), portable config via env var, references `bin/web/search.go`; agent-skills version hard-coded a specific host (`search.<host>`) — less portable. |
+| `web-search` | `<project>`, `agent-skills` | `<project>` | Newer (2026-08-21 vs 2026-08-10), portable config via env var, references `bin/web/search.go`; agent-skills version hard-coded a specific internal host — less portable. |
 | `diataxis-docs` | `<project>`, `agent-skills` | `<project>` | Newer; references current `bin/brain/index.go`. |
 | `po` / `se` / `git-workflow` | global `opencode`, `<project>` | identical content | Byte-identical copies verified via `diff -r`; kept the `<project>` copy. |
 
