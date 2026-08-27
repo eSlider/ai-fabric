@@ -52,7 +52,7 @@ index 111..222 100644
 @@ -10,2 +10,3 @@
  context:
 -  old: true
-+  dir: /home/user/work
++  dir: /Users/user/work
 `
 
 func TestScanDiffSecretsAndPaths(t *testing.T) {
@@ -66,7 +66,7 @@ func TestScanDiffSecretsAndPaths(t *testing.T) {
 		if h.file != "config.yml" {
 			t.Errorf("file = %q, want config.yml", h.file)
 		}
-		if strings.Contains(h.desc, "AKIA") || strings.Contains(h.desc, "/home/user") {
+		if strings.Contains(h.desc, "AKIA") || strings.Contains(h.desc, "/Users/user") {
 			t.Errorf("secret/path value leaked in desc %q", h.desc)
 		}
 	}

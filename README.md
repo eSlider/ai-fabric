@@ -30,6 +30,9 @@ graph TD
 - **`skills/`** — the consolidated skill catalog. Each skill is a subdir with a
   `SKILL.md` (+ aux files) and opencode-compatible frontmatter
   (`name:`/`description:`). Read [`skills/README.md`](skills/README.md).
+  This showcase carries **generic, reusable skills only**; host-specific
+  skills (internal hosts, paths, domain tooling) live exclusively in the
+  private canon `eSlider/inventar` (`docs/skills/`).
 - **`sync.sh`** — idempotent installer that distributes all skills from
   `skills/` into a target opencode skills directory.
 - **`AGENTS.md`** — agent-facing guide to this repo.

@@ -5,7 +5,7 @@ description: Use when implementing, reviewing, or refactoring ANY API/HTTP clien
 
 # API Client Design
 
-Canonical first-class example: **`go-onlyoffice`** (`/path/to/go-onlyoffice`,
+Canonical first-class example: **`go-onlyoffice`** (`path/to/go-onlyoffice`,
 `github.com/eSlider/go-onlyoffice`). Read `client.go`, `auth.go`, `http.go`, `request.go`
 and its `AGENTS.md` before designing a new client or judging an existing one.
 

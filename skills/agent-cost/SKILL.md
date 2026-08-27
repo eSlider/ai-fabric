@@ -10,9 +10,9 @@ description: >-
 
 ```bash
 bin/agents/cost                       # every project, YAML
-bin/agents/cost --repo example-ui   # only sessions whose cwd matches
+bin/agents/cost --repo <any-repo>     # only sessions whose cwd matches
 bin/agents/cost --json | jq .cursor.by_tool
-bin/agents/cost --snapshot after-x --repo example-ui   # append a row to docs/CONTEXT-BUDGET.md
+bin/agents/cost --snapshot after-x --repo <any-repo>   # append a row to docs/CONTEXT-BUDGET.md
 ```
 
 Reads local session storage from OpenCode and Cursor transcripts. Reports the

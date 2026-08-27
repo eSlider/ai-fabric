@@ -5,6 +5,11 @@ Single consolidated catalog of agent skills for the fabric. This is the
 `docs/skills/`); all systems that consume skills copy from here via
 [`sync.sh`](../../sync.sh).
 
+This showcase contains **generic, reusable skills only**. Host-specific
+skills — anything tied to internal hosts, paths or domain tooling — stay in
+the private canon `eSlider/inventar` (`docs/skills/`) and are **not** mirrored
+here.
+
 Each skill lives in its own subdirectory with a `SKILL.md` (plus any auxiliary
 files). Skills carry opencode-compatible frontmatter (`name:`, `description:`)
 so tooling can discover and load them.
@@ -14,7 +19,6 @@ so tooling can discover and load them.
 - [`po`](po/SKILL.md) — product owner role: priorities, acceptance, dispatch.
 - [`se`](se/SKILL.md) — software engineer role: TDD implementation per issue.
 - [`git-workflow`](git-workflow/SKILL.md) — Gitea-only work, Conventional Commits, PR flow, SemVer.
-- [`devops`](devops/SKILL.md) — devops sub-agent role (`RUNBOOK.md` alongside).
 - [`api-client-design`](api-client-design/SKILL.md) — canonical API client architecture.
 
 ## Engineering / technical
@@ -30,14 +34,10 @@ so tooling can discover and load them.
 - [`web-search`](web-search/SKILL.md) — SearXNG web search (`references/instance-tuning.md`).
 - [`diataxis-docs`](diataxis-docs/SKILL.md) — documentation classification by Diataxis.
 
-## Domain
+## Writing / domain style
 
 - [`agent-cost`](agent-cost/SKILL.md) — agent cost accounting.
 - [`caveman-docs`](caveman-docs/SKILL.md) — caveman-style agent chat docs.
-- [`domain-detective`](domain-detective/SKILL.md) — detective method for domain facts.
-- [`db-yaml`](db-yaml/SKILL.md) — database YAML config skill.
-- [`example-repos`](example-repos/SKILL.md) — repo conventions (`scripts/gitea.sh`).
-- [`kb-search`](kb-search/SKILL.md) — knowledge-base search skill.
 
 ## Fabric operating skills (from legacy `docs/skills/`)
 
@@ -58,13 +58,14 @@ most recent and complete** — and record the choice here.
 |-------|---------------|-----------|--------|
 | `web-search` | `<project>`, `agent-skills` | `<project>` | Newer (2026-08-21 vs 2026-08-10), portable config via env var, references `bin/web/search.go`; agent-skills version hard-coded a specific host (`search.<host>`) — less portable. |
 | `diataxis-docs` | `<project>`, `agent-skills` | `<project>` | Newer; references current `bin/brain/index.go`. |
-| `po` / `se` / `git-workflow` / `devops` | global `opencode`, `<project>` | identical content | Byte-identical copies verified via `diff -r`; kept the `<project>` copy. |
+| `po` / `se` / `git-workflow` | global `opencode`, `<project>` | identical content | Byte-identical copies verified via `diff -r`; kept the `<project>` copy. |
 
 Other skills (`api-client`, `duckdb`, `effective-go`, `etl-handler`,
 `picoclaw`, `postgres`, `yq`, `brain`) existed only in `<project>` and are unique.
-`agent-cost`, `caveman-docs`, `domain-detective`, `db-yaml`,
-`example-repos`, `kb-search` existed only in `agent-skills` and are
-unique.
+`agent-cost` and `caveman-docs` existed only in `agent-skills` and are unique.
+
+> Host-specific skills from the legacy merge are not part of this public
+> showcase — they live in the private canon `eSlider/inventar` only.
 
 ## Maintenance
 
