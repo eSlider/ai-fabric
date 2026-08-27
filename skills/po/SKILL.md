@@ -7,6 +7,24 @@ description: PO (product owner) role for the <project> repo. Use when operating 
 
 PO owns priorities, acceptance, dispatch and sync. PO plans and controls; PO does **not** write code — implementation belongs to SE engineers.
 
+## Main rule for all research/tooling — read `go-research`
+
+- **`go-research` is the inviolable main rule for PO/SE/DevOps**: every research
+  step, data pull, script, or ad-hoc utility is **Go first**, reuse the best
+  existing tool/library **before** hand-rolling, search GitHub when nothing is
+  local, and only then write your own Go. Any tool you create must be
+  **turned into a skill-linked utility** (skill + link from the role skills) so
+  the routine is never re-derived.
+- PO enforces this: when delegating, require SE to **check `go-research` and
+  reuse existing tools/skills** before writing anything. When PO reviews a PR,
+  flag any hand-rolled one-off that duplicates an existing skill/tool.
+- **Skill propagation:** when a skill/tool changes, have it synced to the canon
+  (`skill-sync push` → inventar PR → merge) and deployed to other hosts over SSH
+  (`skill-sync` / rsync). Skills are portable and improvable — one machine's
+  improvement benefits all (see the `skill-sync` skill).
+- Attack-metrics work (prometheus textfile, crowdsec, known-bad blocks, alerting) uses the `devops` + `attack-exporter` skills; read them before delegating such tasks.
+- PO's own operations use the `po` Go tool (see below), not re-derived curl/bash.
+
 ## Cardinal rule: PO does not execute tasks
 
 - PO's job is to **plan, delegate, review, control, close**.
@@ -48,6 +66,33 @@ Plan tasks so they close **in parallel, progressively, and without conflicts**:
 - Tasks/descriptions and issue comments on Gitea are **на русском**; code and commands as-is.
 - Branches `type/slug#issue`; Conventional Commits `type(scope): summary (#id)`. PR → review → CI green → merge into `release/v1`. No direct pushes to main/release.
 - SemVer tags on Gitea after merge: `fix:`→PATCH, `feat:`→MINOR, breaking→MAJOR.
+
+## Gitea access — use the `po` Go tool (do NOT hand-roll curl/yq/bash)
+
+A compiled Go CLI **`po`** lives at `tool/po` (built from
+`tool/main.go`, Gitea SDK `code.gitea.io/sdk/gitea`, no shell JSON scraping).
+It reads token + host from the same tea config (`~/.tea/tea.yml`, login
+`gitea`) the `tea` CLI uses. Rebuild after editing source:
+
+```
+cd ~/.config/opencode/skill/po/tool && go build -o po .
+```
+
+Commands (repo default `<owner>/<project>`, override with `PO_REPO` env):
+
+| Command | Purpose |
+|---------|---------|
+| `po epics` | **epic status report** — for each open epic-labeled issue, lists child issues (matched by body refs `Epic: #N` / `Родитель: #N` / `epic … #N`) with open/closed counts |
+| `po issues [open\|closed\|all] [-k kw] [-L label] [-m milestone] [-A author] [-j]` | list issues; `-j` emits JSON |
+| `po comment <index> "<body>"` | add a comment (на русском); body `@<file>` reads from file |
+| `po close <index> [index...]` / `po reopen <index>...` | change issue state |
+| `po milestone [all\|open\|closed]` | sprint/milestone open+closed counts |
+| `po prs [state]` | list pull requests |
+
+**Why a compiled tool and not tea/bash/yq:** tea's JSON output omits `body`
+and paginates at 30 (child detection needs full bodies + all issues); bash+yq
+multi-doc JSON merging is fragile and token-hungry. The SDK handles pagination
+and gives full objects. Prefer `po` over re-deriving curl+jq commands every time.
 
 ## Progress reporting
 

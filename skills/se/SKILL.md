@@ -15,6 +15,8 @@ SE implements a single delegated issue TDD-style. The engineer's job is to **imp
 
 ## Implement (TDD)
 
+- **Read `go-research` FIRST** — the main rule for all research/tooling: Go only, reuse the best existing tool/library before hand-rolling, GitHub search when nothing is local, and turn any new tool into a skill-linked utility so the routine is never repeated. Do not re-derive what already has a skill (po, mails, duckdb, postgres, browser, api-client, dynadot, devops, attack-exporter, …).
+- When a skill/tool changes, propagate it: `skill-sync push` → commit inventar PR → rsync to other hosts (see the `skill-sync` skill).
 - **ТДД — нет теста → не работает → задача открыта.** Write a failing test before the tool code. Then implement until green. A task is NOT done until a test proves it and is green.
 - Network/db calls are wrapped so tests run offline vs fixtures.
 - Follow the repo code standards: Go only, static typing (no `map[string]any` at boundaries, enums named int), primitives via `pkg/utils`, `context.Context` first on every IO op, bounded worker pools for concurrency, `go test -race`, config via `go-config`, no hardcoded absolute paths/host URLs, single implementation per transformer (delete duplicates).
@@ -30,9 +32,16 @@ SE implements a single delegated issue TDD-style. The engineer's job is to **imp
 ## Report on the issue comment
 
 - Post progress **on the Gitea issue comment**, на русском, like a senior engineer: what was implemented, what tests prove it (names + pass), how it was verified, commit/branch ref, and anything blocked.
-- Use the Gitea API, token from `~/.tea/tea.yml` (`token:`), API base `https://<gitea-host>/api/v1`.
+- **Prefer the shared `po` Go tool for Gitea ops** (token + host read from `~/.tea/tea.yml`, same as tea). Set `PO_REPO` for non-default repos.
+  - `~/.config/opencode/skill/po/tool/po comment <index> "<body>"` — add an issue comment
+  - `po issues [state] [-k kw] [-L label] [-m milestone] [-A author]` — list/read issues
+  - Rebuild after skill source changes: `cd ~/.config/opencode/skill/po/tool && go build -o po .`
+  - Fall back to the raw Gitea API (`https://<gitea-host>/api/v1`, token `~/.tea/tea.yml` → `token:`) only if the tool lacks a needed operation.
 - Push a branch `type/slug#issue`; open a PR toward `release/v1`. Do not push directly to main/release.
+- **Create the PR via the Gitea API** (the `po` tool does not yet create PRs); POST `/repos/{owner}/{repo}/pulls` with `{"head":"<branch>","base":"release/v1","title":"...","body":"..."}`.
 - Conventional Commits `type(scope): summary (#id)`.
+- **Secret-scan BEFORE any push** (gitleaks; repo pre-push hook blocks leaks) — never push a secret.
+- Follow the `git-workflow` skill for branching/commits/PR/merge-order discipline (Gitea-only).
 
 ## Escalate blockers
 

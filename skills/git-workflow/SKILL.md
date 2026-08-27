@@ -9,6 +9,12 @@ description: Git workflow for the <project> repo and owned go-* libraries — Gi
 
 - Canonical repo: `git.<host>/<owner>/<project>`. Owned libraries (`github.com/eSlider/go-*`) work on Gitea `git.<host>/eSlider/<repo>`. GitHub is a **publish mirror only**.
 - Issues, PRs, reviews, epics, milestones, releases exist **only on Gitea** — never on GitHub.
+- **GitHub = showroom (rule #190)**: nothing non-project lands on the GitHub
+  mirror — no sales/offer material, no internal paths/hosts/ports, no
+  host-specific docs. Before pushing a branch/tag to GitHub, verify the diff
+  is project content (like the #142 gitleaks scan, but by content too).
+  A leaked feature is purged from GitHub history with `git filter-repo`
+  (precedent #152/#190); Gitea stays the canonical home.
 
 ## Branching
 
@@ -58,7 +64,20 @@ description: Git workflow for the <project> repo and owned go-* libraries — Gi
   - breaking (`!`) → MAJOR
 - Next version computed by the semver tool from the previous tag.
 
-## Gitea API access
+## Gitea access — use the shared `po` Go tool (tea SDK) first
 
-- Token in `~/.tea/tea.yml` (field `token:`). API base `https://<gitea-host>/api/v1`.
-- Issue/PR/comment/review operations via API; issue text and comments on Gitea in Russian.
+Prefer the compiled **`po`** CLI (built on the Gitea SDK, token+host read from
+`~/.tea/tea.yml`) for all Gitea operations. No hand-rolled curl/jq.
+
+- `~/.config/opencode/skill/po/tool/po comment <index> "<body>"` — add an issue comment
+- `po issues [state] [-k kw] [-L label] [-m milestone] [-A author] [-j]` — list/read issues
+- `po close <index> [index...]` / `po reopen <index>...` — change issue state
+- `po milestone [all|open|closed]` — sprint progress
+- `po prs [state]` — list pull requests
+- `po epics` — epic status report
+- Set `PO_REPO=owner/repo` for non-default repos (default `<owner>/<project>`).
+- Rebuild after skill changes: `cd ~/.config/opencode/skill/po/tool && go build -o po .`
+
+Fall back to the raw Gitea REST API (`https://<gitea-host>/api/v1`, token
+`~/.tea/tea.yml` → `token:`) only for operations the tool lacks (e.g. PR create/
+merge, reviews, labels). Issue text and comments on Gitea stay Russian.

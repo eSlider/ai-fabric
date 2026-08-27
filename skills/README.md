@@ -1,8 +1,9 @@
 # Skills Catalog
 
-Single consolidated catalog of agent skills for the fabric. This is the **one
-public source of truth** for skills; all systems that consume skills copy from
-here via [`sync.sh`](../../sync.sh).
+Single consolidated catalog of agent skills for the fabric. This is the
+**public mirror** of the canon (private Gitea `eSlider/inventar`,
+`docs/skills/`); all systems that consume skills copy from here via
+[`sync.sh`](../../sync.sh).
 
 Each skill lives in its own subdirectory with a `SKILL.md` (plus any auxiliary
 files). Skills carry opencode-compatible frontmatter (`name:`, `description:`)
@@ -68,5 +69,7 @@ unique.
 ## Maintenance
 
 - Do **not** edit skills directly in system install dirs (e.g.
-  `~/.config/opencode/skill/`). Edit here and run `../../sync.sh` to propagate.
+  `~/.config/opencode/skill/`) and do **not** edit them here — edit the canon
+  (`eSlider/inventar`, `docs/skills/`), then mirror into this repo and run
+  `../../sync.sh` to propagate.
 - Adding a new skill = add one subdir here, list it above, then `sync.sh`.

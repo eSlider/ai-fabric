@@ -17,6 +17,9 @@ and override anything below in case of conflict.
 
 ## Engineering Rules (Go First)
 
+- **Read `go-research` first** — the main rule: Go only, reuse the best existing
+  tool/library before hand-rolling, GitHub search when nothing is local, and turn
+  any new tool into a skill-linked utility so the routine is never repeated.
 - Prefer Go for new implementation and refactors.
 - Use Python only when there is no viable Go path; if Python is required, use `uv` workflows (`uv venv`, `uv pip`).
 - Prefer pure functions and small focused structs; avoid unnecessary abstractions.

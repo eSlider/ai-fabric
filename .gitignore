@@ -15,3 +15,7 @@ dist/
 # Runtime / generated state
 var/
 go/
+
+# Agent tool binaries (rebuilt from source via go build; keep repo small)
+**/tool/po
+**/tool/skill-sync

@@ -1,8 +1,9 @@
 # AI Fabric
 
-**Single public source of truth for decisions, workflows, and agent skills.**
+**Public mirror of skills for reuse. Canon: eSlider/inventar (private Gitea).
+Sync skills from inventar.**
 
-This repository (branch `release/v2`) deliberately contains **no application
+This repository (branch `main`) deliberately contains **no application
 code**. The Go-based software-delivery fabric (`cmd/`, `pkg/`, `internal/`,
 `Dockerfile`, docker-compose, CI workflow) was stripped so this branch stays
 purely for **decisions, workflows, and skills** and their **reuse across
@@ -10,7 +11,7 @@ systems**.
 
 ```mermaid
 graph TD
-  Fabric[ai-fabric release/v2] --> S[skills/ catalog]
+  Fabric[ai-fabric main] --> S[skills/ catalog]
   Fabric --> D[decisions/ ADRs]
   Fabric --> W[workflows/ runbooks]
   S --> Sync[sync.sh]
@@ -56,11 +57,13 @@ confirm the change set. It logs each skill it syncs.
 
 ### Installing skills
 
-Skills are updated **only** here, never in their installed locations. Workflow:
+Skills are updated **only** in the canon (`eSlider/inventar`, private Gitea),
+never in their installed locations. ai-fabric mirrors the canon; to distribute
+locally:
 
-1. Edit a skill in `skills/<name>/`.
-2. Run `./sync.sh` to propagate.
-3. Commit here on `release/v2`.
+1. Sync the skill in the canon (`inventar/docs/skills/<name>/`).
+2. Mirror it into `skills/` here.
+3. Run `./sync.sh` to propagate.
 
 Removing a skill from the catalog also removes it from the target on the next
 `sync.sh`.

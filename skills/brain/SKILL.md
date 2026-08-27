@@ -22,6 +22,28 @@ second independent source when local roots cannot confirm. An answer is
 `confirmed` only if it comes off the facts root; anything else is
 `(not confirmed)`.
 
+## Corpus — what lives in the brain (#198/#199)
+
+`info` holds the WHOLE corpus, never just one root. Current composition
+(after the mail-corpus fix #199, ~313k leafs):
+
+- **mail** — BOTH corpora index into the brain: live `var/corpus/mail`
+  (inbox 50 + PST) AND legacy `var/mail` (215k message.md: tb-andriy-profile,
+  tb-backup-128g, tb-2010-zip, contacts_eml, defacto, gmail_*, inbox).
+  `bin/brain/index.go --with-mail` loads `brain.MailRoots()` (multi-root +
+  sha256 de-dupe by leaf id). Mail is only in the brain if the index ran with
+  `--with-mail`.
+- **git history** — `bin/brain/import-git.go --root <dir>` (docs + git corpus).
+- **chats** — telegram/linkedin/whatsapp message.md (`--with-chats`).
+- **docs** — README/PLAN/AGENTS/docs/* (default).
+
+If a search misses mail that exists on disk: the brain was rebuilt WITHOUT
+`--with-mail`, or `var/mail` was never indexed. Fix:
+`bin/stack/sync.go --with-mail` (wave step `mail-index`) or
+`bin/brain/index.go --skip --with-mail` (resume/append, de-duped, idempotent).
+`bin/brain/stats.go` must show info ≥ ~200k on the ops host; anything less
+means a corpus is missing.
+
 ```bash
 bin/brain/search.go "Matrix federation"                # pointers + snippets, YAML
 bin/brain/search.go "onlyoffice postgres" --root facts # restrict to confirmed
